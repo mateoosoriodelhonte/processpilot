@@ -28,18 +28,33 @@ fn once_emits_one_real_sanitized_snapshot_without_privileges() {
     assert!(snapshot.system.logical_cpu_count > 0);
     assert!(!snapshot.processes.is_empty());
 
-    let lower = stdout.to_ascii_lowercase();
-    for prohibited in [
-        "commandline",
-        "rawcommand",
-        "environment",
-        "workingdirectory",
-        "authorization",
-    ] {
-        assert!(
-            !lower.contains(prohibited),
-            "found prohibited field: {prohibited}"
-        );
+    let value: serde_json::Value = serde_json::from_str(stdout.trim()).expect("valid JSON");
+    assert_no_prohibited_keys(&value);
+}
+
+fn assert_no_prohibited_keys(value: &serde_json::Value) {
+    match value {
+        serde_json::Value::Object(fields) => {
+            for (key, child) in fields {
+                let lower = key.to_ascii_lowercase();
+                for prohibited in [
+                    "commandline",
+                    "rawcommand",
+                    "environment",
+                    "workingdirectory",
+                    "authorization",
+                ] {
+                    assert!(!lower.contains(prohibited), "found prohibited field: {key}");
+                }
+                assert_no_prohibited_keys(child);
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for child in values {
+                assert_no_prohibited_keys(child);
+            }
+        }
+        _ => {}
     }
 }
 

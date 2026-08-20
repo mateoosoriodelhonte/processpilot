@@ -11,6 +11,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -151,8 +153,12 @@ func normalizeDurationArgs(args []string) []string {
 }
 
 func expandDays(value string) string {
-	var days int
-	if _, err := fmt.Sscanf(value, "%dd", &days); err == nil && fmt.Sprintf("%dd", days) == value {
+	raw, found := strings.CutSuffix(value, "d")
+	if !found {
+		return value
+	}
+	days, err := strconv.ParseInt(raw, 10, 16)
+	if err == nil && days >= 0 && days <= int64(store.MaximumRetention/(24*time.Hour)) {
 		return fmt.Sprintf("%dh", days*24)
 	}
 	return value
@@ -202,7 +208,9 @@ func runServer(ctx context.Context, config serverConfig, output io.Writer) error
 	go func() { producerErrors <- producer(runtimeCtx) }()
 
 	httpServer := &http.Server{
-		Handler: web.New(service).Handler(), ReadHeaderTimeout: 5 * time.Second,
+		Handler: web.NewWithSettings(service, web.Settings{
+			Interval: config.interval, Retention: config.retention, ExplanationProvider: explanationProviderName(config),
+		}).Handler(), ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10,
 	}
 	serverErrors := make(chan error, 1)
@@ -227,6 +235,13 @@ func runServer(ctx context.Context, config serverConfig, output io.Writer) error
 		runtimeErr = fmt.Errorf("shut down dashboard: %w", err)
 	}
 	return runtimeErr
+}
+
+func explanationProviderName(config serverConfig) string {
+	if config.ollamaModel != "" {
+		return "Ollama with NoAI fallback"
+	}
+	return "No AI"
 }
 
 func liveRuntime(ctx context.Context, config serverConfig) (*app.Service, func(context.Context) error, func() error, error) {

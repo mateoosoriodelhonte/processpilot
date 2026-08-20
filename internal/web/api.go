@@ -17,8 +17,15 @@ import (
 const DefaultPort = 7345
 
 type Server struct {
-	service *app.Service
-	mux     *http.ServeMux
+	service  *app.Service
+	mux      *http.ServeMux
+	settings Settings
+}
+
+type Settings struct {
+	Interval            time.Duration
+	Retention           time.Duration
+	ExplanationProvider string
 }
 
 func Address(port int) (string, error) {
@@ -29,7 +36,13 @@ func Address(port int) (string, error) {
 }
 
 func New(service *app.Service) *Server {
-	server := &Server{service: service, mux: http.NewServeMux()}
+	return NewWithSettings(service, Settings{
+		Interval: 2 * time.Second, Retention: 7 * 24 * time.Hour, ExplanationProvider: "No AI",
+	})
+}
+
+func NewWithSettings(service *app.Service, settings Settings) *Server {
+	server := &Server{service: service, mux: http.NewServeMux(), settings: settings}
 	server.routes()
 	server.pageRoutes()
 	return server

@@ -60,9 +60,10 @@ func (NoAIProvider) Explain(_ context.Context, input Input) (Explanation, error)
 	if input.TotalMemoryBytes > 0 {
 		memory += fmt.Sprintf(" (%.1f%% of physical memory)", float64(input.MemoryBytes)/float64(input.TotalMemoryBytes)*100)
 	}
+	category := strings.ReplaceAll(strings.ToLower(string(input.Category)), "_", " ")
 	text := fmt.Sprintf(
 		"%s is classified as %s. It is using %s and %.1f%% CPU. %s %s",
-		input.Application, input.Category, memory, input.CPUPercent,
+		input.Application, category, memory, input.CPUPercent,
 		input.DeterministicReason, input.PotentialImpact,
 	)
 	return Explanation{Text: text, Provider: "ProcessPilot", GeneratedByAI: false}, nil

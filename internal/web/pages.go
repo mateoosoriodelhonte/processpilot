@@ -27,6 +27,7 @@ type pageData struct {
 	Process     *analysis.Process
 	Explanation ai.Explanation
 	History     []analysis.HistoryPoint
+	Settings    Settings
 }
 
 func (server *Server) pageRoutes() {
@@ -56,7 +57,7 @@ func (server *Server) page(name, title string) http.HandlerFunc {
 			http.Error(writer, "Waiting for the first telemetry snapshot.", http.StatusServiceUnavailable)
 			return
 		}
-		data := pageData{Title: title, Navigation: name, State: state}
+		data := pageData{Title: title, Navigation: name, State: state, Settings: server.settings}
 		if name == "history" {
 			history, err := server.service.History(request.Context(), "", time.Now().UTC().Add(-24*time.Hour), 2_000)
 			if err != nil {
@@ -115,9 +116,13 @@ func parsePageTemplates() map[string]*template.Template {
 			return time.UnixMilli(int64(milliseconds)).Local().Format("3:04:05 PM")
 		},
 		"dateTime": func(value time.Time) string { return value.Local().Format("Jan 2, 3:04 PM") },
+		"duration": formatDuration,
 		"lower":    func(value any) string { return strings.ToLower(fmt.Sprint(value)) },
 		"category": func(value analysis.Category) string {
 			return strings.ReplaceAll(strings.ToLower(string(value)), "_", " ")
+		},
+		"label": func(value any) string {
+			return strings.ReplaceAll(strings.ToLower(fmt.Sprint(value)), "_", " ")
 		},
 	}
 	result := make(map[string]*template.Template)
@@ -127,6 +132,13 @@ func parsePageTemplates() map[string]*template.Template {
 		))
 	}
 	return result
+}
+
+func formatDuration(value time.Duration) string {
+	if value%(24*time.Hour) == 0 {
+		return fmt.Sprintf("%d days", int(value/(24*time.Hour)))
+	}
+	return value.String()
 }
 
 func formatBytes(value uint64) string {

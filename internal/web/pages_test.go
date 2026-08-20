@@ -79,6 +79,24 @@ func TestPrivacyPageStatesTheConcreteBoundary(t *testing.T) {
 	}
 }
 
+func TestSettingsPageReflectsEffectiveRuntimeConfiguration(t *testing.T) {
+	service := app.NewService(nil, ai.NoAIProvider{}, true)
+	if err := service.Accept(context.Background(), webSnapshot()); err != nil {
+		t.Fatalf("Accept() error = %v", err)
+	}
+	handler := NewWithSettings(service, Settings{
+		Interval: 3 * time.Second, Retention: 2 * 24 * time.Hour,
+		ExplanationProvider: "Ollama with NoAI fallback",
+	}).Handler()
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/settings", nil))
+	for _, expected := range []string{"3s", "2 days", "Ollama with NoAI fallback", "127.0.0.1"} {
+		if !strings.Contains(recorder.Body.String(), expected) {
+			t.Fatalf("settings page lacks %q: %s", expected, recorder.Body.String())
+		}
+	}
+}
+
 func TestStaticAssetsAreLocalAndCSPCompatible(t *testing.T) {
 	for _, path := range []string{"/static/style.css", "/static/app.js"} {
 		recorder := httptest.NewRecorder()

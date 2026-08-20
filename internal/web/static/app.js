@@ -9,7 +9,7 @@
   const events = new EventSource("/api/v1/events");
   events.addEventListener("snapshot", (event) => {
     const state = JSON.parse(event.data);
-    if (status) status.textContent = state.demo ? "Live · demo data" : "Live · local only";
+    if (status) status.textContent = state.demo ? "Live · demo data · local only" : "Live · local only";
     if (updated) updated.textContent = new Date(state.timestampUnixMs).toLocaleTimeString();
     if (pressure) pressure.textContent = state.pressure.level;
   });
