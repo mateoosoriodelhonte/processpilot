@@ -2,8 +2,8 @@
 
 - [ ] #1 Bootstrap Rust/Go repository
 - [x] #2 Define the versioned collector protocol
-- [ ] #3 Implement unprivileged macOS telemetry collector
-- [ ] #4 Add privacy normalization and redaction layer
+- [x] #3 Implement unprivileged macOS telemetry collector
+- [x] #4 Add privacy normalization and redaction layer
 - [ ] #5 Build the Go collector supervisor
 - [ ] #6 Add SQLite persistence and migrations
 - [ ] #7 Implement bounded telemetry retention
