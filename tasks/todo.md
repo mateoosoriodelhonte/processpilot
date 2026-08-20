@@ -12,7 +12,7 @@
 - [x] #10 Build process ownership tree
 - [x] #11 Add system-pressure model
 - [x] #12 Implement deterministic anomaly detection
-- [ ] #13 Build the localhost-only v1 API
+- [x] #13 Build the localhost-only v1 API
 - [ ] #14 Build the semantic dashboard
 - [ ] #15 Add Server-Sent Events updates
 - [ ] #16 Add history and anomaly views
