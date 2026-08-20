@@ -39,6 +39,9 @@ func TestBuildDoesNotOverGroupUnknownProcesses(t *testing.T) {
 	if len(result.Applications) != 2 {
 		t.Fatalf("unknown applications were over-grouped: %#v", result.Applications)
 	}
+	if result.Applications[0].Key == result.Applications[1].Key {
+		t.Fatalf("unknown applications share a storage key: %#v", result.Applications)
+	}
 	for _, application := range result.Applications {
 		if application.Risk != RiskUnknown || application.Category != CategoryUnknown {
 			t.Fatalf("unknown application lost conservative classification: %#v", application)

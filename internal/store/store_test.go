@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -14,7 +15,7 @@ import (
 func TestOpenMigratesToAPrivacyBoundedSchema(t *testing.T) {
 	store := openTestStore(t, 7*24*time.Hour)
 
-	for _, table := range []string{"system_samples", "application_samples", "process_samples"} {
+	for _, table := range []string{"system_samples", "application_samples"} {
 		rows, err := store.db.QueryContext(context.Background(), "PRAGMA table_info("+table+")")
 		if err != nil {
 			t.Fatalf("table info %s: %v", table, err)
@@ -38,6 +39,13 @@ func TestOpenMigratesToAPrivacyBoundedSchema(t *testing.T) {
 			t.Fatalf("close table info: %v", err)
 		}
 	}
+	var processTableCount int
+	if err := store.db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'process_samples'").Scan(&processTableCount); err != nil {
+		t.Fatalf("inspect process persistence: %v", err)
+	}
+	if processTableCount != 0 {
+		t.Fatal("raw process snapshots must remain memory-only")
+	}
 }
 
 func TestRecordAndHistoryRoundTripSanitizedTelemetry(t *testing.T) {
@@ -57,6 +65,68 @@ func TestRecordAndHistoryRoundTripSanitizedTelemetry(t *testing.T) {
 	}
 }
 
+func TestRecordKeepsSameNamedUnknownProcessesSeparate(t *testing.T) {
+	telemetryStore := openTestStore(t, 7*24*time.Hour)
+	now := time.Unix(1_787_250_000, 0)
+	snapshot := testSnapshot(now, "worker")
+	snapshot.Processes = []protocol.ProcessSample{
+		{PID: 10, Name: "worker", CPUPercent: 1, MemoryBytes: 1 << 20, StartTimeUnixSeconds: uint64(now.Add(-time.Hour).Unix()), Status: "Run"},
+		{PID: 11, Name: "worker", CPUPercent: 2, MemoryBytes: 2 << 20, StartTimeUnixSeconds: uint64(now.Add(-time.Hour).Unix()), Status: "Run"},
+	}
+	result := analysis.Build(snapshot.Processes)
+	if len(result.Applications) != 2 {
+		t.Fatalf("applications = %#v", result.Applications)
+	}
+	if err := telemetryStore.Record(context.Background(), snapshot, result); err != nil {
+		t.Fatalf("Record() error = %v", err)
+	}
+	var count int
+	if err := telemetryStore.db.QueryRow("SELECT COUNT(*) FROM application_samples").Scan(&count); err != nil {
+		t.Fatalf("count application samples: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("persisted application count = %d", count)
+	}
+}
+
+func TestRecordDownsamplesHistoryAndBoundsApplicationRows(t *testing.T) {
+	telemetryStore := openTestStore(t, 7*24*time.Hour)
+	base := time.Unix(1_787_250_000, 0)
+	for _, offset := range []time.Duration{0, 2 * time.Second, 59 * time.Second, time.Minute} {
+		snapshot := testSnapshot(base.Add(offset), "Ollama")
+		if err := telemetryStore.Record(context.Background(), snapshot, analysis.Build(snapshot.Processes)); err != nil {
+			t.Fatalf("Record(%s) error = %v", offset, err)
+		}
+	}
+	var systemCount int
+	if err := telemetryStore.db.QueryRow("SELECT COUNT(*) FROM system_samples").Scan(&systemCount); err != nil {
+		t.Fatalf("count system samples: %v", err)
+	}
+	if systemCount != 2 {
+		t.Fatalf("persisted system samples = %d, want 2", systemCount)
+	}
+
+	now := base.Add(time.Hour)
+	large := testSnapshot(now, "unused")
+	large.Processes = make([]protocol.ProcessSample, MaximumHistoricalApplications+20)
+	for index := range large.Processes {
+		large.Processes[index] = protocol.ProcessSample{
+			PID: uint32(index + 10), Name: "unknown-" + strconv.Itoa(index), CPUPercent: 1,
+			MemoryBytes: uint64(index+1) << 20, StartTimeUnixSeconds: uint64(now.Add(-time.Hour).Unix()), Status: "Run",
+		}
+	}
+	if err := telemetryStore.Record(context.Background(), large, analysis.Build(large.Processes)); err != nil {
+		t.Fatalf("Record(large) error = %v", err)
+	}
+	var latestApplicationCount int
+	if err := telemetryStore.db.QueryRow("SELECT COUNT(*) FROM application_samples WHERE timestamp_ms = ?", large.TimestampUnixMS).Scan(&latestApplicationCount); err != nil {
+		t.Fatalf("count bounded applications: %v", err)
+	}
+	if latestApplicationCount != MaximumHistoricalApplications {
+		t.Fatalf("persisted applications = %d, want %d", latestApplicationCount, MaximumHistoricalApplications)
+	}
+}
+
 func TestApplicationHistoryUsesParametersNotSQLConcatenation(t *testing.T) {
 	store := openTestStore(t, 7*24*time.Hour)
 	snapshot := testSnapshot(time.Unix(1_787_250_000, 0), "normal")
@@ -71,6 +141,25 @@ func TestApplicationHistoryUsesParametersNotSQLConcatenation(t *testing.T) {
 	}
 	if len(history) != 0 {
 		t.Fatalf("injection-like application matched rows: %#v", history)
+	}
+}
+
+func TestHistoryLimitReturnsNewestEvidenceInChronologicalOrder(t *testing.T) {
+	telemetryStore := openTestStore(t, 7*24*time.Hour)
+	base := time.Unix(1_787_250_000, 0)
+	for index := range 3 {
+		snapshot := testSnapshot(base.Add(time.Duration(index)*time.Minute), "Ollama")
+		if err := telemetryStore.Record(context.Background(), snapshot, analysis.Build(snapshot.Processes)); err != nil {
+			t.Fatalf("Record() error = %v", err)
+		}
+	}
+
+	history, err := telemetryStore.ApplicationHistory(context.Background(), "Ollama", time.Unix(0, 0), 2)
+	if err != nil {
+		t.Fatalf("ApplicationHistory() error = %v", err)
+	}
+	if len(history) != 2 || !history[0].Timestamp.Equal(base.Add(time.Minute)) || !history[1].Timestamp.Equal(base.Add(2*time.Minute)) {
+		t.Fatalf("history = %#v, want latest two in chronological order", history)
 	}
 }
 

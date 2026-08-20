@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/mateoosoriodelhonte/processpilot/internal/analysis"
@@ -15,14 +16,19 @@ import (
 )
 
 const (
-	DefaultRetention = 7 * 24 * time.Hour
-	MinimumRetention = time.Hour
-	MaximumRetention = 30 * 24 * time.Hour
+	DefaultRetention              = 7 * 24 * time.Hour
+	MinimumRetention              = time.Hour
+	MaximumRetention              = 30 * 24 * time.Hour
+	HistoryInterval               = time.Minute
+	MaximumHistoricalApplications = 100
 )
 
 type Store struct {
-	db        *sql.DB
-	retention time.Duration
+	db             *sql.DB
+	retention      time.Duration
+	mutex          sync.Mutex
+	lastRecordedMS int64
+	lastCleanupMS  int64
 }
 
 func Open(path string, retention time.Duration) (*Store, error) {
@@ -46,7 +52,12 @@ func Open(path string, retention time.Duration) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	return &Store{db: db, retention: retention}, nil
+	var lastRecordedMS int64
+	if err := db.QueryRow("SELECT COALESCE(MAX(timestamp_ms), 0) FROM system_samples").Scan(&lastRecordedMS); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("read latest telemetry timestamp: %w", err)
+	}
+	return &Store{db: db, retention: retention, lastRecordedMS: lastRecordedMS}, nil
 }
 
 func (s *Store) Close() error {
@@ -58,6 +69,11 @@ func (s *Store) Record(ctx context.Context, snapshot protocol.Snapshot, result a
 		return errors.New("snapshot timestamp exceeds SQLite integer range")
 	}
 	timestamp := int64(snapshot.TimestampUnixMS)
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	if s.lastRecordedMS > 0 && timestamp < s.lastRecordedMS+HistoryInterval.Milliseconds() {
+		return nil
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin telemetry transaction: %w", err)
@@ -79,12 +95,16 @@ func (s *Store) Record(ctx context.Context, snapshot protocol.Snapshot, result a
 		return fmt.Errorf("insert system sample: %w", err)
 	}
 
-	for _, application := range result.Applications {
+	applications := result.Applications
+	if len(applications) > MaximumHistoricalApplications {
+		applications = applications[:MaximumHistoricalApplications]
+	}
+	for _, application := range applications {
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO application_samples (
-				timestamp_ms, application, category, stopping_risk, process_count, cpu_percent, memory_bytes
-			) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			timestamp, application.Name, application.Category, application.Risk,
+				timestamp_ms, app_key, application, category, stopping_risk, process_count, cpu_percent, memory_bytes
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			timestamp, application.Key, application.Name, application.Category, application.Risk,
 			application.ProcessCount, application.CPUPercent, application.MemoryBytes,
 		)
 		if err != nil {
@@ -92,25 +112,10 @@ func (s *Store) Record(ctx context.Context, snapshot protocol.Snapshot, result a
 		}
 	}
 
-	for _, process := range result.Processes {
-		observed := process.Observed
-		_, err = tx.ExecContext(ctx, `
-			INSERT INTO process_samples (
-				timestamp_ms, pid, start_time_unix_seconds, parent_pid, name, executable, status,
-				application, category, stopping_risk, cpu_percent, memory_bytes
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			timestamp, observed.PID, observed.StartTimeUnixSeconds, nullableUint32(observed.ParentPID),
-			observed.Name, nullableString(observed.Executable), observed.Status, process.Ownership.Application,
-			process.Classification.Category, process.Classification.Risk, observed.CPUPercent, observed.MemoryBytes,
-		)
-		if err != nil {
-			return fmt.Errorf("insert process sample: %w", err)
-		}
-	}
-
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit telemetry transaction: %w", err)
 	}
+	s.lastRecordedMS = timestamp
 	return nil
 }
 
@@ -120,10 +125,14 @@ func (s *Store) ApplicationHistory(ctx context.Context, application string, sinc
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT timestamp_ms, application, memory_bytes, cpu_percent
-		FROM application_samples
-		WHERE application = ? AND timestamp_ms >= ?
-		ORDER BY timestamp_ms ASC
-		LIMIT ?`, application, since.UnixMilli(), limit)
+		FROM (
+			SELECT timestamp_ms, application, memory_bytes, cpu_percent
+			FROM application_samples
+			WHERE application = ? AND timestamp_ms >= ?
+			ORDER BY timestamp_ms DESC
+			LIMIT ?
+		)
+		ORDER BY timestamp_ms ASC`, application, since.UnixMilli(), limit)
 	if err != nil {
 		return nil, fmt.Errorf("query application history: %w", err)
 	}
@@ -151,10 +160,14 @@ func (s *Store) AllApplicationHistory(ctx context.Context, since time.Time, limi
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT timestamp_ms, application, memory_bytes, cpu_percent
-		FROM application_samples
-		WHERE timestamp_ms >= ?
-		ORDER BY timestamp_ms ASC, application ASC
-		LIMIT ?`, since.UnixMilli(), limit)
+		FROM (
+			SELECT timestamp_ms, application, memory_bytes, cpu_percent
+			FROM application_samples
+			WHERE timestamp_ms >= ?
+			ORDER BY timestamp_ms DESC, application DESC
+			LIMIT ?
+		)
+		ORDER BY timestamp_ms ASC, application ASC`, since.UnixMilli(), limit)
 	if err != nil {
 		return nil, fmt.Errorf("query history: %w", err)
 	}
@@ -177,6 +190,12 @@ func (s *Store) AllApplicationHistory(ctx context.Context, since time.Time, limi
 }
 
 func (s *Store) Cleanup(ctx context.Context, now time.Time) (int64, error) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	nowMS := now.UnixMilli()
+	if s.lastCleanupMS > 0 && nowMS < s.lastCleanupMS+int64((10*time.Minute)/time.Millisecond) {
+		return 0, nil
+	}
 	cutoff := now.Add(-s.retention).UnixMilli()
 	result, err := s.db.ExecContext(ctx, "DELETE FROM system_samples WHERE timestamp_ms < ?", cutoff)
 	if err != nil {
@@ -186,21 +205,8 @@ func (s *Store) Cleanup(ctx context.Context, now time.Time) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("count expired telemetry: %w", err)
 	}
+	s.lastCleanupMS = nowMS
 	return deleted, nil
-}
-
-func nullableUint32(value *uint32) any {
-	if value == nil {
-		return nil
-	}
-	return int64(*value)
-}
-
-func nullableString(value *string) any {
-	if value == nil {
-		return nil
-	}
-	return *value
 }
 
 func configure(db *sql.DB) error {
@@ -222,9 +228,10 @@ type migration struct {
 	sql     string
 }
 
-var migrations = []migration{{
-	version: 1,
-	sql: `
+var migrations = []migration{
+	{
+		version: 1,
+		sql: `
 		CREATE TABLE system_samples (
 			timestamp_ms INTEGER PRIMARY KEY,
 			sequence INTEGER NOT NULL,
@@ -266,7 +273,35 @@ var migrations = []migration{{
 		);
 		CREATE INDEX application_samples_lookup ON application_samples(application, timestamp_ms);
 		CREATE INDEX process_samples_identity ON process_samples(name, start_time_unix_seconds, timestamp_ms);`,
-}}
+	},
+	{
+		version: 2,
+		sql: `
+		CREATE TABLE application_samples_v2 (
+			timestamp_ms INTEGER NOT NULL REFERENCES system_samples(timestamp_ms) ON DELETE CASCADE,
+			app_key TEXT NOT NULL,
+			application TEXT NOT NULL,
+			category TEXT NOT NULL,
+			stopping_risk TEXT NOT NULL,
+			process_count INTEGER NOT NULL,
+			cpu_percent REAL NOT NULL,
+			memory_bytes INTEGER NOT NULL,
+			PRIMARY KEY (timestamp_ms, app_key)
+		);
+		INSERT INTO application_samples_v2 (
+			timestamp_ms, app_key, application, category, stopping_risk, process_count, cpu_percent, memory_bytes
+		)
+		SELECT timestamp_ms, 'legacy:' || application, application, category, stopping_risk, process_count, cpu_percent, memory_bytes
+		FROM application_samples;
+		DROP TABLE application_samples;
+		ALTER TABLE application_samples_v2 RENAME TO application_samples;
+		CREATE INDEX application_samples_lookup ON application_samples(application, timestamp_ms);`,
+	},
+	{
+		version: 3,
+		sql:     `DROP TABLE IF EXISTS process_samples;`,
+	},
+}
 
 func migrate(db *sql.DB) error {
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (

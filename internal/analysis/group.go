@@ -29,6 +29,7 @@ type Process struct {
 }
 
 type Application struct {
+	Key          string   `json:"-"`
 	Name         string   `json:"name"`
 	Category     Category `json:"category"`
 	Risk         Risk     `json:"stoppingRisk"`
@@ -60,13 +61,13 @@ func Build(samples []protocol.ProcessSample) Result {
 			Observed: sample, Classification: classified, Ownership: ownership,
 		})
 
-		groupKey := ownership.Application
+		groupKey := "known:" + ownership.Application
 		if ownership.Confidence == ConfidenceUnknown {
 			groupKey = fmt.Sprintf("unknown:%d", sample.PID)
 		}
 		group := groups[groupKey]
 		if group == nil {
-			group = &Application{Name: ownership.Application, Category: classified.Category, Risk: classified.Risk}
+			group = &Application{Key: groupKey, Name: ownership.Application, Category: classified.Category, Risk: classified.Risk}
 			groups[groupKey] = group
 		}
 		group.ProcessCount++
@@ -86,6 +87,9 @@ func Build(samples []protocol.ProcessSample) Result {
 	}
 	sort.Slice(result.Applications, func(i, j int) bool {
 		if result.Applications[i].MemoryBytes == result.Applications[j].MemoryBytes {
+			if result.Applications[i].Name == result.Applications[j].Name {
+				return result.Applications[i].Key < result.Applications[j].Key
+			}
 			return result.Applications[i].Name < result.Applications[j].Name
 		}
 		return result.Applications[i].MemoryBytes > result.Applications[j].MemoryBytes
