@@ -83,3 +83,20 @@ func TestCommandSurfaceContainsNoProcessControl(t *testing.T) {
 		}
 	}
 }
+
+func TestReadOnlyCLIInvocationAcceptsOnlyAValidatedLoopbackPort(t *testing.T) {
+	port, args, err := parseCLIInvocation([]string{"inspect", "95707", "--port", "8123"})
+	if err != nil {
+		t.Fatalf("parseCLIInvocation() error = %v", err)
+	}
+	if port != 8123 || len(args) != 2 || args[0] != "inspect" || args[1] != "95707" {
+		t.Fatalf("invocation = port %d args %v", port, args)
+	}
+	for _, invocation := range [][]string{
+		{"status", "extra"}, {"top", "--port", "80"}, {"inspect"}, {"kill", "1"},
+	} {
+		if _, _, err := parseCLIInvocation(invocation); err == nil {
+			t.Fatalf("parseCLIInvocation(%v) unexpectedly succeeded", invocation)
+		}
+	}
+}

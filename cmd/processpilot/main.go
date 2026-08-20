@@ -50,9 +50,13 @@ func run(args []string, output, errorOutput io.Writer) int {
 		return 0
 	}
 	if len(args) > 0 && isCLICommand(args[0]) {
-		client, err := cli.New(web.DefaultPort)
+		port, commandArgs, err := parseCLIInvocation(args)
+		var client *cli.Client
 		if err == nil {
-			err = client.Run(context.Background(), args, output)
+			client, err = cli.New(port)
+		}
+		if err == nil {
+			err = client.Run(context.Background(), commandArgs, output)
 		}
 		if err != nil {
 			fmt.Fprintf(errorOutput, "ProcessPilot: %v\n", err)
@@ -82,6 +86,33 @@ func run(args []string, output, errorOutput io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+func parseCLIInvocation(args []string) (int, []string, error) {
+	if len(args) == 0 || !isCLICommand(args[0]) {
+		return 0, nil, errors.New("read-only CLI command is required")
+	}
+	argumentCount := 1
+	if args[0] == "inspect" || args[0] == "explain" {
+		argumentCount = 2
+	}
+	if len(args) < argumentCount {
+		return 0, nil, errors.New("PID is required")
+	}
+	port := web.DefaultPort
+	flags := flag.NewFlagSet("processpilot "+args[0], flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	flags.IntVar(&port, "port", port, "loopback dashboard port")
+	if err := flags.Parse(args[argumentCount:]); err != nil {
+		return 0, nil, err
+	}
+	if flags.NArg() != 0 {
+		return 0, nil, fmt.Errorf("unexpected argument %q", flags.Arg(0))
+	}
+	if _, err := web.Address(port); err != nil {
+		return 0, nil, err
+	}
+	return port, append([]string(nil), args[:argumentCount]...), nil
 }
 
 func isCLICommand(command string) bool {
@@ -344,10 +375,10 @@ func writeUsage(output io.Writer) {
 	fmt.Fprintln(output, `Usage:
   processpilot [serve] [--port 7345] [--interval 2s] [--retention 7d]
   processpilot demo [--port 7345] [--interval 2s]
-  processpilot status
-  processpilot top
-  processpilot inspect PID
-  processpilot explain PID
+  processpilot status [--port 7345]
+  processpilot top [--port 7345]
+  processpilot inspect PID [--port 7345]
+  processpilot explain PID [--port 7345]
 
 ProcessPilot is read-only. It has no kill, stop, restart, or command execution interface.`)
 }
