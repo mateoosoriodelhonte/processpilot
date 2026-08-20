@@ -23,7 +23,7 @@
 - [x] #21 Add cross-language contract tests
 - [ ] #22 Measure and bound performance
 - [ ] #23 Complete privacy, architecture, and threat-model documentation
-- [ ] #24 Package ProcessPilot for macOS
+- [x] #24 Package ProcessPilot for macOS
 - [ ] #25 Release ProcessPilot v1.0
 
 ## Standing Definition of Done

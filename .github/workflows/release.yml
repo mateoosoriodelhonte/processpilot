@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package macOS ${{ matrix.arch }}
+    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, amd64]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Validate tag and version
+        run: test "${GITHUB_REF_NAME#v}" = "$(tr -d '[:space:]' < VERSION)"
+      - name: Build archive
+        env:
+          PROCESSPILOT_TARGET_ARCH: ${{ matrix.arch }}
+        run: ./scripts/package.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: processpilot-darwin-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub release
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Verify checksums
+        run: cd dist && shasum -a 256 -c *.sha256
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --generate-notes --title "ProcessPilot $GITHUB_REF_NAME"
