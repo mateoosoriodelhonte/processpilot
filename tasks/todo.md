@@ -19,7 +19,7 @@
 - [x] #17 Build the read-only CLI
 - [x] #18 Add NoAI explanation provider
 - [x] #19 Add optional local Ollama explanations
-- [ ] #20 Add security regression suite
+- [x] #20 Add security regression suite
 - [x] #21 Add cross-language contract tests
 - [ ] #22 Measure and bound performance
 - [ ] #23 Complete privacy, architecture, and threat-model documentation
