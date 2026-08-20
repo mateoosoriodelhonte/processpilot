@@ -1,7 +1,7 @@
 # ProcessPilot V1 Task List
 
 - [ ] #1 Bootstrap Rust/Go repository
-- [ ] #2 Define the versioned collector protocol
+- [x] #2 Define the versioned collector protocol
 - [ ] #3 Implement unprivileged macOS telemetry collector
 - [ ] #4 Add privacy normalization and redaction layer
 - [ ] #5 Build the Go collector supervisor
