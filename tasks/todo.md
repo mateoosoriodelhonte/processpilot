@@ -1,6 +1,6 @@
 # ProcessPilot V1 Task List
 
-- [ ] #1 Bootstrap Rust/Go repository
+- [x] #1 Bootstrap Rust/Go repository
 - [x] #2 Define the versioned collector protocol
 - [x] #3 Implement unprivileged macOS telemetry collector
 - [x] #4 Add privacy normalization and redaction layer
@@ -21,8 +21,8 @@
 - [x] #19 Add optional local Ollama explanations
 - [x] #20 Add security regression suite
 - [x] #21 Add cross-language contract tests
-- [ ] #22 Measure and bound performance
-- [ ] #23 Complete privacy, architecture, and threat-model documentation
+- [x] #22 Measure and bound performance
+- [x] #23 Complete privacy, architecture, and threat-model documentation
 - [x] #24 Package ProcessPilot for macOS
 - [ ] #25 Release ProcessPilot v1.0
 

@@ -21,6 +21,8 @@ ProcessPilot never says “safe to kill.” Risk is informational and conservati
 
 ## Ownership and grouping
 
-Ownership walks parent PIDs with a visited set and a 64-node bound. Cycles, missing parents, and unknown identities remain low-confidence. A known signature or `.app` bundle may establish an owner. Unknown processes are keyed by PID rather than grouped merely because names match.
+Ownership walks parent PIDs with a visited set and a 64-node bound. Cycles, missing parents, and unknown identities remain low-confidence. A known signature or `.app` bundle may establish an owner. Unknown processes are keyed internally by PID rather than grouped merely because names match. This internal key keeps storage rows distinct and is not serialized in the API.
 
 Application CPU and memory are sums of member observations. Member PIDs are retained so users can move from grouped application evidence to raw process evidence.
+
+History is sampled once per minute and retains at most the 100 highest-memory application groups. Current classifications and raw-process inspection still use every accepted live snapshot.

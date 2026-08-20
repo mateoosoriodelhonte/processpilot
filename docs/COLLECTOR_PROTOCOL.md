@@ -27,6 +27,8 @@ Each process contains only:
 
 There is deliberately no command-line, environment, working-directory, open-file, network, file-content, process-memory, or process-control field.
 
+Raw process snapshots are current-state input only and remain in Go memory. SQLite history receives one-minute system and top-application aggregates, not this process array.
+
 ## Validation
 
 The Go decoder rejects:
