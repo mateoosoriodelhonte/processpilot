@@ -1,4 +1,4 @@
-// Command performance measures the real collector schema and SQLite writer.
+// Command performance measures the real collector, analysis, state, anomaly, and SQLite path.
 // It stores only in a newly created temporary directory and prints aggregate counts.
 package main
 
@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/mateoosoriodelhonte/processpilot/internal/ai"
 	"github.com/mateoosoriodelhonte/processpilot/internal/analysis"
+	"github.com/mateoosoriodelhonte/processpilot/internal/app"
 	collectorclient "github.com/mateoosoriodelhonte/processpilot/internal/collector"
 	"github.com/mateoosoriodelhonte/processpilot/internal/store"
 )
@@ -53,6 +55,7 @@ func measure() error {
 	if err != nil {
 		return err
 	}
+	service := app.NewService(telemetryStore, ai.NoAIProvider{}, false)
 
 	sampleCount := int(logicalDuration / sampleInterval)
 	base := time.Now().UTC().Add(-logicalDuration)
@@ -61,9 +64,9 @@ func measure() error {
 		at := base.Add(time.Duration(index) * sampleInterval)
 		snapshot.TimestampUnixMS = uint64(at.UnixMilli())
 		snapshot.Sequence = uint64(index + 1)
-		if err := telemetryStore.Record(context.Background(), snapshot, result); err != nil {
+		if err := service.Accept(context.Background(), snapshot); err != nil {
 			_ = telemetryStore.Close()
-			return fmt.Errorf("record measurement sample %d: %w", index, err)
+			return fmt.Errorf("accept measurement sample %d: %w", index, err)
 		}
 	}
 	writeDuration := time.Since(started)
@@ -76,7 +79,7 @@ func measure() error {
 	}
 
 	persistedSamples := int(logicalDuration / store.HistoryInterval)
-	fmt.Printf("process_count=%d\napplication_count=%d\ncollector_samples=%d\npersisted_samples=%d\nlogical_duration=%s\nwrite_duration=%s\nsqlite_bytes=%d\nbytes_per_persisted_sample=%.1f\n",
+	fmt.Printf("process_count=%d\napplication_count=%d\ncollector_samples=%d\npersisted_samples=%d\nlogical_duration=%s\ningestion_duration=%s\nsqlite_bytes=%d\nbytes_per_persisted_sample=%.1f\n",
 		len(snapshot.Processes), len(result.Applications), sampleCount, persistedSamples, logicalDuration,
 		writeDuration.Round(time.Millisecond), databaseBytes, float64(databaseBytes)/float64(persistedSamples))
 	return nil

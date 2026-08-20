@@ -57,24 +57,27 @@ func Build(samples []protocol.ProcessSample) Result {
 	for _, sample := range samples {
 		classified := classifications[sample.PID]
 		ownership := resolveOwnership(sample.PID, byPID, classifications)
+		ownerClassification := classifications[ownership.OwnerPID]
+		if ownership.Confidence == ConfidenceUnknown {
+			ownerClassification = classified
+		}
 		result.Processes = append(result.Processes, Process{
 			Observed: sample, Classification: classified, Ownership: ownership,
 		})
 
 		groupKey := "known:" + ownership.Application
 		if ownership.Confidence == ConfidenceUnknown {
-			groupKey = fmt.Sprintf("unknown:%d", sample.PID)
+			groupKey = fmt.Sprintf("unknown:%d:%d", sample.PID, sample.StartTimeUnixSeconds)
 		}
 		group := groups[groupKey]
 		if group == nil {
-			group = &Application{Key: groupKey, Name: ownership.Application, Category: classified.Category, Risk: classified.Risk}
+			group = &Application{Key: groupKey, Name: ownership.Application, Category: ownerClassification.Category, Risk: ownerClassification.Risk}
 			groups[groupKey] = group
 		}
 		group.ProcessCount++
 		group.CPUPercent += sample.CPUPercent
 		group.MemoryBytes += sample.MemoryBytes
 		group.PIDs = append(group.PIDs, sample.PID)
-		group.Category = mergeCategory(group.Category, classified.Category)
 		group.Risk = moreConservativeRisk(group.Risk, classified.Risk)
 	}
 
@@ -103,8 +106,13 @@ func resolveOwnership(pid uint32, samples map[uint32]protocol.ProcessSample, cla
 	current := pid
 	var bestPID uint32
 	var best Classification
+	cleanTermination := false
 
 	for len(chain) < 64 {
+		if current == 0 {
+			cleanTermination = true
+			break
+		}
 		if _, exists := seen[current]; exists {
 			break
 		}
@@ -115,16 +123,17 @@ func resolveOwnership(pid uint32, samples map[uint32]protocol.ProcessSample, cla
 			break
 		}
 		classified := classifications[current]
-		if classified.Category != CategoryUnknown && bestPID == 0 {
+		if classified.Category != CategoryUnknown && (classified.Category != CategorySystemService || current == pid) {
 			bestPID, best = current, classified
 		}
 		if sample.ParentPID == nil {
+			cleanTermination = true
 			break
 		}
 		current = *sample.ParentPID
 	}
 
-	if bestPID != 0 {
+	if bestPID != 0 && cleanTermination {
 		confidence := ConfidenceKnownSignature
 		if best.Category == CategoryUserApplication {
 			confidence = ConfidenceApplicationBundle

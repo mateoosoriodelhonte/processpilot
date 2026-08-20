@@ -1,6 +1,6 @@
 [package]
 name = "processpilot-collector"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 rust-version = "1.95"
 description = "Unprivileged, privacy-safe macOS telemetry collector for ProcessPilot"

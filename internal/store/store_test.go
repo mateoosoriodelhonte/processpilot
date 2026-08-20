@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -65,6 +66,25 @@ func TestRecordAndHistoryRoundTripSanitizedTelemetry(t *testing.T) {
 	}
 }
 
+func TestRecordNeverPersistsPartialApplicationAggregates(t *testing.T) {
+	telemetryStore := openTestStore(t, 7*24*time.Hour)
+	snapshot := testSnapshot(time.Unix(1_787_250_000, 0), "Ollama")
+	snapshot.ProcessesTruncated = true
+	if err := telemetryStore.Record(context.Background(), snapshot, analysis.Build(snapshot.Processes)); err != nil {
+		t.Fatalf("Record() error = %v", err)
+	}
+	var systems, applications int
+	if err := telemetryStore.db.QueryRow("SELECT COUNT(*) FROM system_samples").Scan(&systems); err != nil {
+		t.Fatalf("count system samples: %v", err)
+	}
+	if err := telemetryStore.db.QueryRow("SELECT COUNT(*) FROM application_samples").Scan(&applications); err != nil {
+		t.Fatalf("count application samples: %v", err)
+	}
+	if systems != 1 || applications != 0 {
+		t.Fatalf("persisted systems=%d applications=%d, want 1 and 0", systems, applications)
+	}
+}
+
 func TestRecordKeepsSameNamedUnknownProcessesSeparate(t *testing.T) {
 	telemetryStore := openTestStore(t, 7*24*time.Hour)
 	now := time.Unix(1_787_250_000, 0)
@@ -86,6 +106,33 @@ func TestRecordKeepsSameNamedUnknownProcessesSeparate(t *testing.T) {
 	}
 	if count != 2 {
 		t.Fatalf("persisted application count = %d", count)
+	}
+	keys := []string{result.Applications[0].Key, result.Applications[1].Key}
+	history, err := telemetryStore.AnomalyHistory(context.Background(), time.Unix(0, 0), 10, keys)
+	if err != nil {
+		t.Fatalf("AnomalyHistory() error = %v", err)
+	}
+	if len(history) != 2 || history[0].Key == history[1].Key {
+		t.Fatalf("unknown history identities collapsed: %#v", history)
+	}
+}
+
+func TestOpenRejectsANewerSchemaVersionForSafeRollback(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "processpilot.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	_, err = db.Exec(`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at_ms INTEGER NOT NULL); INSERT INTO schema_migrations VALUES (999, 0);`)
+	if closeErr := db.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		t.Fatalf("prepare future schema: %v", err)
+	}
+	if opened, err := Open(path, DefaultRetention); err == nil {
+		_ = opened.Close()
+		t.Fatal("Open() accepted a newer schema version")
 	}
 }
 

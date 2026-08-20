@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="/static/style.css">
   <script defer src="/static/app.js"></script>
 </head>
-<body>
+<body data-snapshot-timestamp="{{.State.Snapshot.TimestampUnixMS}}">
   <a class="skip-link" href="#content">Skip to content</a>
   <div class="shell">
     <aside class="sidebar" aria-label="Primary navigation">
@@ -34,6 +34,8 @@
     </aside>
     <main id="content" tabindex="-1">
       {{if .State.Demo}}<div class="demo-banner" role="status"><strong>Demo data</strong><span>These numbers are deterministic examples, not telemetry from this Mac.</span></div>{{end}}
+      {{if .State.Snapshot.ProcessesTruncated}}<div class="demo-banner" role="status"><strong>Partial process list</strong><span>The collector bounded this snapshot to stay within the local protocol limit. System totals remain complete.</span></div>{{end}}
+      {{if .State.Warning}}<div class="demo-banner" role="status"><strong>Degraded history</strong><span>{{.State.Warning}}</span></div>{{end}}
       {{template "content" .}}
       <footer>ProcessPilot observes, classifies, and explains. It never controls processes.</footer>
     </main>

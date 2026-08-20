@@ -13,8 +13,8 @@
   <section class="panel wide">
     <div class="section-heading"><div><p class="eyebrow">Measured now</p><h2>Top applications</h2></div><a href="/applications">View all</a></div>
     {{if .State.Analysis.Applications}}
-    <div class="table-scroll"><table><thead><tr><th>Application</th><th>Category</th><th>Processes</th><th>CPU</th><th>Memory</th><th>Stopping risk</th></tr></thead><tbody>
-      {{range .State.Analysis.Applications}}<tr><td><strong>{{.Name}}</strong></td><td>{{category .Category}}</td><td>{{.ProcessCount}}</td><td>{{percent .CPUPercent}}</td><td><strong>{{bytes .MemoryBytes}}</strong></td><td><span class="risk {{lower .Risk}}">{{.Risk}}</span></td></tr>{{end}}
+    <div class="table-scroll" role="region" aria-label="Top applications table" tabindex="0"><table><thead><tr><th>Application</th><th>Category</th><th>Processes</th><th>CPU</th><th>Memory</th><th>Stopping risk</th></tr></thead><tbody>
+      {{range .State.Analysis.Applications}}<tr><td><a class="process-link" href="/applications/{{pathSegment .Key}}"><strong>{{.Name}}</strong></a></td><td>{{category .Category}}</td><td>{{.ProcessCount}}</td><td>{{percent .CPUPercent}}</td><td><strong>{{bytes .MemoryBytes}}</strong></td><td><span class="risk {{lower .Risk}}">{{.Risk}}</span></td></tr>{{end}}
     </tbody></table></div>
     {{else}}<div class="empty"><h3>No application data yet</h3><p>The first grouped snapshot will appear here.</p></div>{{end}}
   </section>

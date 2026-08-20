@@ -46,7 +46,17 @@ npx playwright install chromium
 npm test
 ```
 
-The browser suite starts a labeled demo server on `127.0.0.1:7346`, runs desktop and mobile flows, and fails on unexpected remote requests.
+The browser suite starts a labeled demo server on `127.0.0.1:7346`, runs desktop and mobile flows, fails on unexpected remote requests, and applies axe-core WCAG 2.1 AA rules to every primary/detail page.
+
+Release dependency gates:
+
+```sh
+cargo audit
+govulncheck ./...
+npm audit --audit-level=high
+```
+
+CI installs pinned audit-tool versions before running these commands.
 
 ## Repository layout
 
@@ -81,7 +91,13 @@ Live runs write only to ProcessPilot's per-user configuration directory. Tests u
 make package
 ```
 
-The packaging script validates the architecture, builds both sibling binaries, creates `dist/processpilot-<version>-darwin-<arch>.tar.gz`, and writes a SHA-256 file. CI builds both `arm64` and `amd64` targets. It never installs a launch daemon or writes to system locations.
+The packaging script validates an exact `MAJOR.MINOR.PATCH` version and architecture, builds both sibling binaries, creates `dist/processpilot-<version>-darwin-<arch>.tar.gz`, and writes a portable SHA-256 file containing only the archive filename. Archive timestamps default to the current Git commit time (or explicit `SOURCE_DATE_EPOCH`), ownership and ordering are normalized, and gzip timestamps are disabled. CI builds both `arm64` and `amd64` targets, asserts each Mach-O architecture, verifies the archive checksum, and smoke-runs the native packaged pair against its loopback API. It never installs a launch daemon or writes to system locations.
+
+## Upgrade, reinstall, and rollback
+
+Release archives are self-contained directories containing a matched `processpilot` / `processpilot-collector` binary pair. Stop ProcessPilot, verify and extract the new archive into a new directory, and launch it from there. Do not mix binaries from different archives. Reinstalling or replacing the binary directory does not delete the application-owned SQLite history under the per-user ProcessPilot configuration directory.
+
+Before a future schema-changing upgrade, stop ProcessPilot and copy its application-owned database if you need a rollback backup. To roll back, stop the newer binary pair and restart the previously verified pair. A ProcessPilot binary refuses a database schema newer than it supports instead of guessing at compatibility; restore the matching pre-upgrade database backup if that check fails. V1 release rollback is otherwise a binary-directory switch because no daemon, privileged helper, or system installation exists.
 
 ## Removing a development build
 

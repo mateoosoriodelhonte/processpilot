@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -35,8 +36,8 @@ func TestAcceptBuildsPersistsAndPublishesReadOnlyState(t *testing.T) {
 	}
 	select {
 	case update := <-updates:
-		if update.Snapshot.Sequence != snapshot.Sequence {
-			t.Fatalf("update sequence = %d", update.Snapshot.Sequence)
+		if update.Sequence != snapshot.Sequence {
+			t.Fatalf("update sequence = %d", update.Sequence)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("subscriber did not receive state")
@@ -74,6 +75,36 @@ func TestDemoStateIsExplicitlyLabeled(t *testing.T) {
 	}
 }
 
+func TestAcceptCachesBoundedAnomalyHistoryBetweenRetentionSamples(t *testing.T) {
+	store := &fakeStore{}
+	service := NewService(store, ai.NoAIProvider{}, false)
+	first := serviceSnapshot()
+	second := first
+	second.Sequence++
+	second.TimestampUnixMS += uint64((2 * time.Second).Milliseconds())
+
+	if err := service.Accept(context.Background(), first); err != nil {
+		t.Fatalf("Accept(first) error = %v", err)
+	}
+	if err := service.Accept(context.Background(), second); err != nil {
+		t.Fatalf("Accept(second) error = %v", err)
+	}
+	if store.anomalyReads != 1 {
+		t.Fatalf("anomaly history reads = %d, want 1 per minute", store.anomalyReads)
+	}
+}
+
+func TestAcceptKeepsCurrentTelemetryAvailableWhenHistoryFails(t *testing.T) {
+	service := NewService(&fakeStore{failure: errors.New("database unavailable")}, ai.NoAIProvider{}, false)
+	if err := service.Accept(context.Background(), serviceSnapshot()); err != nil {
+		t.Fatalf("Accept() error = %v, want graceful degradation", err)
+	}
+	state, ok := service.Current()
+	if !ok || state.Warning != persistenceWarning || len(state.Analysis.Processes) == 0 {
+		t.Fatalf("degraded state = %#v", state)
+	}
+}
+
 func TestCurrentReturnsAnImmutableCopy(t *testing.T) {
 	service := NewService(nil, ai.NoAIProvider{}, false)
 	if err := service.Accept(context.Background(), serviceSnapshot()); err != nil {
@@ -91,27 +122,70 @@ func TestCurrentReturnsAnImmutableCopy(t *testing.T) {
 	}
 }
 
+func TestLiveUpdateIsBoundedAndOmitsPIDLists(t *testing.T) {
+	applications := make([]analysis.Application, maximumUpdateApplications+1)
+	for index := range applications {
+		applications[index] = analysis.Application{Name: "application", PIDs: []uint32{uint32(index + 1)}}
+	}
+	update := stateUpdate(State{Analysis: analysis.Result{Applications: applications}})
+	if len(update.Applications) != maximumUpdateApplications {
+		t.Fatalf("update applications = %d, want %d", len(update.Applications), maximumUpdateApplications)
+	}
+	for _, application := range update.Applications {
+		if application.PIDs != nil {
+			t.Fatalf("live update retained PID list: %#v", application.PIDs)
+		}
+	}
+}
+
+func TestPartialSnapshotSuppressesAnomalies(t *testing.T) {
+	snapshot := serviceSnapshot()
+	snapshot.ProcessesTruncated = true
+	service := NewService(&fakeStore{history: []analysis.HistoryPoint{{
+		Timestamp: time.UnixMilli(int64(snapshot.TimestampUnixMS)).Add(-time.Minute),
+		Key:       "known:Ollama", Application: "Ollama", CPUPercent: 100, MemoryBytes: 1 << 30,
+	}}}, ai.NoAIProvider{}, false)
+	if err := service.Accept(context.Background(), snapshot); err != nil {
+		t.Fatalf("Accept() error = %v", err)
+	}
+	state, _ := service.Current()
+	if len(state.Anomalies) != 0 {
+		t.Fatalf("partial snapshot produced anomalies: %#v", state.Anomalies)
+	}
+}
+
 type fakeStore struct {
-	records  int
-	cleanups int
-	history  []analysis.HistoryPoint
+	records      int
+	cleanups     int
+	anomalyReads int
+	history      []analysis.HistoryPoint
+	failure      error
 }
 
 func (store *fakeStore) Record(context.Context, protocol.Snapshot, analysis.Result) error {
 	store.records++
-	return nil
+	return store.failure
 }
 
 func (store *fakeStore) Cleanup(context.Context, time.Time) (int64, error) {
 	store.cleanups++
-	return 0, nil
+	return 0, store.failure
 }
 
 func (store *fakeStore) AllApplicationHistory(context.Context, time.Time, int) ([]analysis.HistoryPoint, error) {
 	return store.history, nil
 }
 
+func (store *fakeStore) AnomalyHistory(context.Context, time.Time, int, []string) ([]analysis.HistoryPoint, error) {
+	store.anomalyReads++
+	return store.history, store.failure
+}
+
 func (store *fakeStore) ApplicationHistory(context.Context, string, time.Time, int) ([]analysis.HistoryPoint, error) {
+	return store.history, nil
+}
+
+func (store *fakeStore) ApplicationKeyHistory(context.Context, string, time.Time, int) ([]analysis.HistoryPoint, error) {
 	return store.history, nil
 }
 

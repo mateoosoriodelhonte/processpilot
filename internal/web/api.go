@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/mateoosoriodelhonte/processpilot/internal/ai"
@@ -92,7 +95,7 @@ func (server *Server) processes(writer http.ResponseWriter, request *http.Reques
 		return
 	}
 	data, pagination := paginate(state.Analysis.Processes, page, pageSize)
-	writeJSON(writer, http.StatusOK, map[string]any{"data": data, "pagination": pagination, "demo": state.Demo})
+	writeJSON(writer, http.StatusOK, map[string]any{"data": data, "pagination": pagination, "demo": state.Demo, "processesTruncated": state.Snapshot.ProcessesTruncated})
 }
 
 func (server *Server) process(writer http.ResponseWriter, request *http.Request) {
@@ -105,13 +108,12 @@ func (server *Server) process(writer http.ResponseWriter, request *http.Request)
 		writeError(writer, http.StatusBadRequest, "INVALID_PID", "PID must be a positive integer.")
 		return
 	}
-	process, ok := server.service.Process(uint32(parsed))
-	if !ok {
-		writeError(writer, http.StatusNotFound, "PROCESS_NOT_FOUND", "The process is not in the current snapshot.")
-		return
-	}
-	explanation, err := server.service.Explain(request.Context(), uint32(parsed))
+	process, explanation, err := server.service.ProcessDetail(request.Context(), uint32(parsed))
 	if err != nil {
+		if errors.Is(err, app.ErrProcessNotFound) {
+			writeError(writer, http.StatusNotFound, "PROCESS_NOT_FOUND", "The process is not in the current snapshot.")
+			return
+		}
 		writeError(writer, http.StatusServiceUnavailable, "EXPLANATION_UNAVAILABLE", "The explanation is temporarily unavailable.")
 		return
 	}
@@ -133,7 +135,7 @@ func (server *Server) applications(writer http.ResponseWriter, request *http.Req
 		return
 	}
 	data, pagination := paginate(state.Analysis.Applications, page, pageSize)
-	writeJSON(writer, http.StatusOK, map[string]any{"data": data, "pagination": pagination, "demo": state.Demo})
+	writeJSON(writer, http.StatusOK, map[string]any{"data": data, "pagination": pagination, "demo": state.Demo, "processesTruncated": state.Snapshot.ProcessesTruncated})
 }
 
 func (server *Server) history(writer http.ResponseWriter, request *http.Request) {
@@ -142,7 +144,12 @@ func (server *Server) history(writer http.ResponseWriter, request *http.Request)
 		return
 	}
 	query := request.URL.Query()
-	since := time.Now().UTC().Add(-24 * time.Hour)
+	state, available := server.service.Current()
+	if !available {
+		writeError(writer, http.StatusServiceUnavailable, "TELEMETRY_UNAVAILABLE", "No telemetry snapshot is available yet.")
+		return
+	}
+	since := time.UnixMilli(int64(state.Snapshot.TimestampUnixMS)).UTC().Add(-24 * time.Hour)
 	if raw := query.Get("since"); raw != "" {
 		parsed, err := time.Parse(time.RFC3339, raw)
 		if err != nil {
@@ -212,8 +219,9 @@ func (server *Server) events(writer http.ResponseWriter, request *http.Request) 
 				return
 			}
 			payload, err := json.Marshal(eventState{
-				TimestampUnixMS: state.Snapshot.TimestampUnixMS, Pressure: state.Pressure,
-				Applications: state.Analysis.Applications, Anomalies: state.Anomalies, Demo: state.Demo,
+				TimestampUnixMS: state.TimestampUnixMS, Pressure: state.Pressure,
+				Applications: state.Applications, Anomalies: state.Anomalies, Demo: state.Demo,
+				ProcessesTruncated: state.ProcessesTruncated,
 			})
 			if err != nil {
 				return
@@ -235,11 +243,12 @@ type processDetail struct {
 }
 
 type eventState struct {
-	TimestampUnixMS uint64                 `json:"timestampUnixMs"`
-	Pressure        analysis.Pressure      `json:"pressure"`
-	Applications    []analysis.Application `json:"applications"`
-	Anomalies       []analysis.Anomaly     `json:"anomalies"`
-	Demo            bool                   `json:"demo"`
+	TimestampUnixMS    uint64                 `json:"timestampUnixMs"`
+	Pressure           analysis.Pressure      `json:"pressure"`
+	Applications       []analysis.Application `json:"applications"`
+	Anomalies          []analysis.Anomaly     `json:"anomalies"`
+	Demo               bool                   `json:"demo"`
+	ProcessesTruncated bool                   `json:"processesTruncated"`
 }
 
 type pagination struct {
@@ -252,10 +261,10 @@ type pagination struct {
 func paginate[T any](values []T, page, pageSize int) ([]T, pagination) {
 	total := len(values)
 	totalPages := (total + pageSize - 1) / pageSize
-	start := (page - 1) * pageSize
-	if start >= total {
+	if totalPages == 0 || page > totalPages {
 		return []T{}, pagination{Page: page, PageSize: pageSize, TotalItems: total, TotalPages: totalPages}
 	}
+	start := (page - 1) * pageSize
 	end := min(start+pageSize, total)
 	return values[start:end], pagination{Page: page, PageSize: pageSize, TotalItems: total, TotalPages: totalPages}
 }
@@ -308,6 +317,33 @@ func securityHeaders(next http.Handler) http.Handler {
 		writer.Header().Set("Referrer-Policy", "no-referrer")
 		writer.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
 		writer.Header().Set("Cache-Control", "no-store")
+		if !isLoopbackAuthority(request.Host) || !isLoopbackOrigin(request.Header.Get("Origin")) {
+			writeError(writer, http.StatusMisdirectedRequest, "LOOPBACK_REQUIRED", "ProcessPilot accepts requests only from this Mac's loopback origin.")
+			return
+		}
 		next.ServeHTTP(writer, request)
 	})
+}
+
+func isLoopbackOrigin(origin string) bool {
+	if origin == "" {
+		return true
+	}
+	parsed, err := url.Parse(origin)
+	return err == nil && parsed.Scheme == "http" && parsed.User == nil && parsed.Path == "" && parsed.RawQuery == "" && parsed.Fragment == "" && isLoopbackAuthority(parsed.Host)
+}
+
+func isLoopbackAuthority(authority string) bool {
+	host := authority
+	if parsedHost, _, err := net.SplitHostPort(authority); err == nil {
+		host = parsedHost
+	} else if strings.Count(authority, ":") == 1 {
+		return false
+	}
+	host = strings.Trim(host, "[]")
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

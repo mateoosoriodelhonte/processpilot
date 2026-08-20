@@ -1,7 +1,7 @@
 {{define "content"}}
 <header class="page-header"><div><p class="eyebrow">Advanced evidence</p><h1>Raw processes</h1><p>Individual process measurements. Unknown identities remain unknown.</p></div></header>
 <section class="panel">
-  {{if .State.Analysis.Processes}}<div class="table-scroll"><table><thead><tr><th>Process</th><th>PID</th><th>Application owner</th><th>State</th><th>CPU</th><th>Memory</th><th>Risk</th></tr></thead><tbody>
+  {{if .State.Analysis.Processes}}<div class="table-scroll" role="region" aria-label="Processes table" tabindex="0"><table><thead><tr><th>Process</th><th>PID</th><th>Application owner</th><th>State</th><th>CPU</th><th>Memory</th><th>Risk</th></tr></thead><tbody>
   {{range .State.Analysis.Processes}}<tr><td><a class="process-link" href="/processes/{{.Observed.PID}}"><strong>{{.Observed.Name}}</strong><small>{{if .Observed.Executable}}{{.Observed.Executable}}{{else}}Executable unavailable{{end}}</small></a></td><td class="mono">{{.Observed.PID}}</td><td>{{.Ownership.Application}}</td><td>{{.Observed.Status}}</td><td>{{percent .Observed.CPUPercent}}</td><td>{{bytes .Observed.MemoryBytes}}</td><td><span class="risk {{lower .Classification.Risk}}">{{.Classification.Risk}}</span></td></tr>{{end}}
   </tbody></table></div>{{else}}<div class="empty"><h2>No processes yet</h2><p>Raw process evidence appears after a telemetry snapshot.</p></div>{{end}}
 </section>

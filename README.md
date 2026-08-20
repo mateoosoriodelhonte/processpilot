@@ -25,7 +25,7 @@ Read the detailed [privacy model](docs/PRIVACY.md), [threat model](docs/THREAT_M
 - Separates observed evidence, deterministic classification, conservative stopping risk, and optional explanation text.
 - Detects documented memory spikes, sustained CPU, monotonic growth, and new major consumers.
 - Retains bounded local application history for seven days by default.
-- Serves Overview, Applications, Processes, Process Detail, History, Anomalies, Privacy, and Settings pages.
+- Serves Overview, Applications, Application Detail, Processes, Process Detail, History, Anomalies, Privacy, and Settings pages.
 - Provides read-only `status`, `top`, `inspect`, and `explain` CLI commands.
 - Works fully without AI. Optional Ollama explanations use a loopback-only, allowlisted payload and fail back to deterministic text.
 
@@ -148,6 +148,8 @@ npm ci
 npx playwright install chromium
 npm test
 ```
+
+Release CI additionally runs pinned `cargo audit`, `govulncheck`, and `npm audit` checks. Browser tests include automated WCAG 2.1 AA checks in desktop and mobile Chromium.
 
 Measured overhead and the storage redesign are recorded in [docs/PERFORMANCE.md](docs/PERFORMANCE.md). Project changes follow the issue → branch → tests → PR → green CI → merge workflow.
 

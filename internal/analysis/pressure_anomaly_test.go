@@ -74,7 +74,8 @@ func TestDetectAnomaliesFindsNewMajorConsumerButAvoidsClaimsWithoutEnoughHistory
 	now := time.Unix(1_787_250_000, 0)
 	current := []Application{{Name: "New VM", MemoryBytes: 8 << 30, CPUPercent: 2}}
 
-	anomalies := DetectAnomalies(nil, current, 64<<30, now)
+	history := []HistoryPoint{{Timestamp: now.Add(-time.Minute), Key: "known:Existing", Application: "Existing"}}
+	anomalies := DetectAnomalies(history, current, 64<<30, now)
 	assertAnomalyKind(t, anomalies, AnomalyNewMajorConsumer)
 	if len(anomalies) != 1 {
 		t.Fatalf("anomalies = %#v, want only new major consumer", anomalies)
@@ -83,6 +84,21 @@ func TestDetectAnomaliesFindsNewMajorConsumerButAvoidsClaimsWithoutEnoughHistory
 	small := []Application{{Name: "Tiny", MemoryBytes: 100 << 20, CPUPercent: 1}}
 	if got := DetectAnomalies(nil, small, 64<<30, now); len(got) != 0 {
 		t.Fatalf("insufficient history produced anomaly: %#v", got)
+	}
+}
+
+func TestDetectAnomaliesRequiresRecentConsecutiveSamples(t *testing.T) {
+	now := time.Unix(1_787_250_000, 0)
+	history := []HistoryPoint{
+		{Timestamp: now.Add(-48 * time.Hour), Key: "known:Ollama", Application: "Ollama", MemoryBytes: 1 << 30, CPUPercent: 90},
+		{Timestamp: now.Add(-24 * time.Hour), Key: "known:Ollama", Application: "Ollama", MemoryBytes: 2 << 30, CPUPercent: 90},
+		{Timestamp: now.Add(-12 * time.Hour), Key: "known:Ollama", Application: "Ollama", MemoryBytes: 3 << 30, CPUPercent: 90},
+		{Timestamp: now.Add(-6 * time.Hour), Key: "known:Ollama", Application: "Ollama", MemoryBytes: 4 << 30, CPUPercent: 90},
+	}
+	current := []Application{{Key: "known:Ollama", Name: "Ollama", MemoryBytes: 10 << 30, CPUPercent: 90}}
+
+	if anomalies := DetectAnomalies(history, current, 64<<30, now); len(anomalies) != 0 {
+		t.Fatalf("stale, non-consecutive evidence produced anomalies: %#v", anomalies)
 	}
 }
 

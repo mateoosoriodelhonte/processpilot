@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -40,7 +41,7 @@ func TestReadOnlyAPIRoutesExposeSeparatedEvidence(t *testing.T) {
 		"/api/v1/anomalies",
 	} {
 		recorder := httptest.NewRecorder()
-		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		handler.ServeHTTP(recorder, localRequest(http.MethodGet, path, nil))
 		if recorder.Code != http.StatusOK {
 			t.Fatalf("GET %s status = %d body=%s", path, recorder.Code, recorder.Body.String())
 		}
@@ -56,7 +57,7 @@ func TestReadOnlyAPIRoutesExposeSeparatedEvidence(t *testing.T) {
 	}
 
 	detail := httptest.NewRecorder()
-	handler.ServeHTTP(detail, httptest.NewRequest(http.MethodGet, "/api/v1/processes/10", nil))
+	handler.ServeHTTP(detail, localRequest(http.MethodGet, "/api/v1/processes/10", nil))
 	var response map[string]any
 	if err := json.Unmarshal(detail.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode detail: %v", err)
@@ -77,20 +78,20 @@ func TestNoCommandProcessControlOrFilesystemRouteExists(t *testing.T) {
 		"/api/v1/files/etc/passwd",
 	} {
 		recorder := httptest.NewRecorder()
-		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		handler.ServeHTTP(recorder, localRequest(http.MethodGet, path, nil))
 		if recorder.Code != http.StatusNotFound {
 			t.Fatalf("GET %s status = %d, want 404", path, recorder.Code)
 		}
 	}
 
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/v1/processes/10", strings.NewReader(`{"action":"kill"}`)))
+	handler.ServeHTTP(recorder, localRequest(http.MethodPost, "/api/v1/processes/10", strings.NewReader(`{"action":"kill"}`)))
 	if recorder.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("POST process status = %d, want 405", recorder.Code)
 	}
 
 	recorder = httptest.NewRecorder()
-	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/history?path=/etc/passwd", nil))
+	handler.ServeHTTP(recorder, localRequest(http.MethodGet, "/api/v1/history?path=/etc/passwd", nil))
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("filesystem-like query status = %d, want 400", recorder.Code)
 	}
@@ -105,7 +106,7 @@ func TestMalformedAPIInputFailsWithConsistentErrors(t *testing.T) {
 		"/api/v1/history?since=not-a-time",
 	} {
 		recorder := httptest.NewRecorder()
-		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		handler.ServeHTTP(recorder, localRequest(http.MethodGet, path, nil))
 		if recorder.Code != http.StatusBadRequest {
 			t.Fatalf("GET %s status = %d body=%s", path, recorder.Code, recorder.Body.String())
 		}
@@ -119,6 +120,40 @@ func TestMalformedAPIInputFailsWithConsistentErrors(t *testing.T) {
 			t.Fatalf("inconsistent error for %s: %s (%v)", path, recorder.Body.String(), err)
 		}
 	}
+}
+
+func TestPaginationSafelyHandlesAPlatformMaximumPage(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	testHandler(t).ServeHTTP(recorder, localRequest(http.MethodGet, "/api/v1/processes?page=9223372036854775807&pageSize=200", nil))
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"data":[]`) {
+		t.Fatalf("status = %d body=%s, want an empty bounded page", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestRejectsNonLoopbackHostAndCrossOriginRequests(t *testing.T) {
+	handler := testHandler(t)
+	tests := []struct {
+		name   string
+		mutate func(*http.Request)
+	}{
+		{name: "non-loopback host", mutate: func(request *http.Request) { request.Host = "attacker.example" }},
+		{name: "cross-origin", mutate: func(request *http.Request) { request.Header.Set("Origin", "https://attacker.example") }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			request := localRequest(http.MethodGet, "/api/v1/system", nil)
+			tt.mutate(request)
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusMisdirectedRequest {
+				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusMisdirectedRequest)
+			}
+		})
+	}
+}
+
+func localRequest(method, target string, body io.Reader) *http.Request {
+	return httptest.NewRequest(method, "http://127.0.0.1"+target, body)
 }
 
 func testHandler(t *testing.T) http.Handler {

@@ -56,8 +56,10 @@ func TestOwnershipTraversalHandlesCyclesAndMissingParents(t *testing.T) {
 	second.ParentPID = uint32Pointer(301)
 	missing := sampleProcess(303, "orphan", "~/<private>/orphan")
 	missing.ParentPID = uint32Pointer(999)
+	knownMissing := sampleProcess(304, "qemu-system-aarch64", "/opt/homebrew/bin/qemu-system-aarch64")
+	knownMissing.ParentPID = uint32Pointer(999)
 
-	result := Build([]protocol.ProcessSample{first, second, missing})
+	result := Build([]protocol.ProcessSample{first, second, missing, knownMissing})
 
 	for _, process := range result.Processes {
 		if len(process.Ownership.Chain) > 3 {
@@ -66,6 +68,30 @@ func TestOwnershipTraversalHandlesCyclesAndMissingParents(t *testing.T) {
 		if process.Ownership.Confidence != ConfidenceUnknown {
 			t.Fatalf("malformed graph gained confidence: %#v", process.Ownership)
 		}
+	}
+}
+
+func TestOwnershipPrefersTheOutermostRecognizedApplicationButNotLaunchd(t *testing.T) {
+	qemu := sampleProcess(400, "qemu-system-aarch64", "/opt/homebrew/bin/qemu-system-aarch64")
+	limactl := sampleProcess(401, "limactl", "/opt/homebrew/bin/limactl")
+	colima := sampleProcess(402, "colima", "/opt/homebrew/bin/colima")
+	qemu.ParentPID = uint32Pointer(401)
+	limactl.ParentPID = uint32Pointer(402)
+
+	launchd := sampleProcess(1, "launchd", "/sbin/launchd")
+	unknown := sampleProcess(500, "private-worker", "~/<private>/private-worker")
+	unknown.ParentPID = uint32Pointer(1)
+
+	result := Build([]protocol.ProcessSample{qemu, limactl, colima, unknown, launchd})
+	byPID := make(map[uint32]Process)
+	for _, process := range result.Processes {
+		byPID[process.Observed.PID] = process
+	}
+	if got := byPID[400].Ownership.Application; got != "Colima" {
+		t.Fatalf("qemu owner = %q, want Colima", got)
+	}
+	if got := byPID[500].Ownership.Confidence; got != ConfidenceUnknown {
+		t.Fatalf("unknown launchd child confidence = %q, want UNKNOWN", got)
 	}
 }
 

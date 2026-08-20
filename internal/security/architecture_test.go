@@ -58,7 +58,7 @@ func TestNoCommandControlOrFilesystemAPIExists(t *testing.T) {
 	}
 	for _, request := range requests {
 		recorder := httptest.NewRecorder()
-		handler.ServeHTTP(recorder, httptest.NewRequest(request.method, request.path, nil))
+		handler.ServeHTTP(recorder, httptest.NewRequest(request.method, "http://127.0.0.1"+request.path, nil))
 		if recorder.Code >= 200 && recorder.Code < 300 {
 			t.Fatalf("%s %s exposed status %d: %s", request.method, request.path, recorder.Code, recorder.Body.String())
 		}

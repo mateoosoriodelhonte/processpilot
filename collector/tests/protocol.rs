@@ -1,4 +1,7 @@
-use processpilot_collector::protocol::{PROTOCOL_VERSION, ProcessSample, Snapshot, SystemSample};
+use processpilot_collector::protocol::{
+    MAX_LINE_BYTES, PROTOCOL_VERSION, ProcessSample, Snapshot, SystemSample,
+    encode_bounded_snapshot,
+};
 
 fn sample_snapshot() -> Snapshot {
     Snapshot {
@@ -17,6 +20,7 @@ fn sample_snapshot() -> Snapshot {
             load_average_15: 2.4,
             logical_cpu_count: 12,
         },
+        processes_truncated: false,
         processes: vec![ProcessSample {
             pid: 95_707,
             parent_pid: Some(95_000),
@@ -64,4 +68,25 @@ fn rejects_unknown_fields_to_prevent_accidental_data_expansion() {
 
     let error = serde_json::from_value::<Snapshot>(value).expect_err("unknown field must fail");
     assert!(error.to_string().contains("unknown field"));
+}
+
+#[test]
+fn bounded_encoding_marks_and_truncates_oversized_process_tables() {
+    let mut snapshot = sample_snapshot();
+    let template = snapshot.processes[0].clone();
+    snapshot.processes = (1..=5_000)
+        .map(|pid| ProcessSample {
+            pid,
+            name: format!("worker-{pid}-{}", "x".repeat(220)),
+            executable: Some(format!("/Applications/Worker.app/{}", "y".repeat(1_900))),
+            ..template.clone()
+        })
+        .collect();
+
+    let encoded = encode_bounded_snapshot(snapshot).expect("snapshot should encode");
+    let decoded: Snapshot = serde_json::from_slice(&encoded).expect("bounded output should decode");
+
+    assert!(encoded.len() <= MAX_LINE_BYTES);
+    assert!(decoded.processes_truncated);
+    assert!(decoded.processes.len() < 5_000);
 }

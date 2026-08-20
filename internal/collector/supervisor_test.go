@@ -78,6 +78,66 @@ func TestIngestAcceptsValidLinesAndRejectsMalformedData(t *testing.T) {
 	}
 }
 
+func TestIngestRejectsReplayedSequence(t *testing.T) {
+	first := validSnapshotJSON()
+	err := ingest(strings.NewReader(first+"\n"+first+"\n"), func(protocol.Snapshot) error { return nil })
+	if err == nil || !errors.Is(err, ErrCollectorOutput) {
+		t.Fatalf("ingest() error = %v, want ErrCollectorOutput", err)
+	}
+}
+
+func TestIngestUsesSequenceNotWallClockForOrdering(t *testing.T) {
+	first := validSnapshotJSON()
+	second := strings.Replace(strings.Replace(first, `"sequence":1`, `"sequence":2`, 1), `"timestampUnixMs":1787256000000`, `"timestampUnixMs":1787255999999`, 1)
+	if err := ingest(strings.NewReader(first+"\n"+second+"\n"), func(protocol.Snapshot) error { return nil }); err != nil {
+		t.Fatalf("ingest() error = %v", err)
+	}
+}
+
+func TestIngestAcceptsAnExactMaximumSizeJSONLine(t *testing.T) {
+	valid := validSnapshotJSON()
+	line := strings.Repeat(" ", protocol.MaxLineBytes-len(valid)) + valid + "\n"
+	if err := ingest(strings.NewReader(line), func(protocol.Snapshot) error { return nil }); err != nil {
+		t.Fatalf("ingest() error = %v", err)
+	}
+}
+
+func TestSupervisorTimesOutWhenCollectorEmitsNoSnapshot(t *testing.T) {
+	supervisor, err := NewSupervisor("/tmp/processpilot-collector", 2*time.Second)
+	if err != nil {
+		t.Fatalf("NewSupervisor() error = %v", err)
+	}
+	supervisor.livenessTimeout = 50 * time.Millisecond
+	supervisor.execCommand = func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "sleep", "5")
+	}
+
+	_, err = supervisor.Sample(context.Background())
+	if err == nil || !errors.Is(err, ErrCollectorOutput) {
+		t.Fatalf("Sample() error = %v, want ErrCollectorOutput", err)
+	}
+}
+
+func TestSupervisorTimesOutWhenCollectorClosesOutputButDoesNotExit(t *testing.T) {
+	supervisor, err := NewSupervisor("/tmp/processpilot-collector", 2*time.Second)
+	if err != nil {
+		t.Fatalf("NewSupervisor() error = %v", err)
+	}
+	supervisor.livenessTimeout = 50 * time.Millisecond
+	supervisor.execCommand = func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "exec 1>&-; sleep 5")
+	}
+
+	started := time.Now()
+	err = supervisor.Stream(context.Background(), func(protocol.Snapshot) error { return nil })
+	if err == nil || !errors.Is(err, ErrCollectorOutput) {
+		t.Fatalf("Stream() error = %v, want ErrCollectorOutput", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("Stream() remained blocked for %s", elapsed)
+	}
+}
+
 func TestSampleUsesOnlyOnceArgument(t *testing.T) {
 	supervisor, err := NewSupervisor("/tmp/processpilot-collector", 2*time.Second)
 	if err != nil {
@@ -110,5 +170,5 @@ func contains(values []string, want string) bool {
 }
 
 func validSnapshotJSON() string {
-	return `{"protocolVersion":1,"timestampUnixMs":1787256000000,"sequence":1,"system":{"totalMemoryBytes":100,"usedMemoryBytes":50,"availableMemoryBytes":50,"totalSwapBytes":0,"usedSwapBytes":0,"cpuPercent":10,"loadAverage1":1,"loadAverage5":1,"loadAverage15":1,"logicalCpuCount":8},"processes":[{"pid":2,"parentPid":1,"name":"known","executable":"/Applications/Known.app/Known","cpuPercent":1,"memoryBytes":10,"startTimeUnixSeconds":1787250000,"status":"Run"}]}`
+	return `{"protocolVersion":1,"timestampUnixMs":1787256000000,"sequence":1,"system":{"totalMemoryBytes":100,"usedMemoryBytes":50,"availableMemoryBytes":50,"totalSwapBytes":0,"usedSwapBytes":0,"cpuPercent":10,"loadAverage1":1,"loadAverage5":1,"loadAverage15":1,"logicalCpuCount":8},"processesTruncated":false,"processes":[{"pid":2,"parentPid":1,"name":"known","executable":"/Applications/Known.app/Known","cpuPercent":1,"memoryBytes":10,"startTimeUnixSeconds":1787250000,"status":"Run"}]}`
 }

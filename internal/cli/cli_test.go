@@ -82,3 +82,19 @@ func TestRejectsOversizedLocalAPIResponse(t *testing.T) {
 		t.Fatal("oversized local API response unexpectedly accepted")
 	}
 }
+
+func TestTerminalOutputStripsControlSequences(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(writer, `{"data":{"observed":{"pid":7,"name":"worker\u001b]52;c;clipboard\u0007","cpuPercent":1,"memoryBytes":1,"startTimeUnixSeconds":1,"status":"Run\u001b[2J"},"classification":{"application":"worker","category":"UNKNOWN","stoppingRisk":"UNKNOWN","reason":"unknown","potentialImpact":"unknown"},"ownership":{"application":"worker","ownerPid":7,"chain":[7],"confidence":"UNKNOWN"},"explanation":{"text":"plain\u001b[31mred","provider":"ProcessPilot","generatedByAI":false}}}`)
+	}))
+	defer server.Close()
+	client := &Client{baseURL: server.URL, httpClient: server.Client()}
+	var output strings.Builder
+	if err := client.Run(context.Background(), []string{"inspect", "7"}, &output); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if strings.ContainsAny(output.String(), "\x1b\x07") {
+		t.Fatalf("terminal output contains control sequence: %q", output.String())
+	}
+}

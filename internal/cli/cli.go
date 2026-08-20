@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/mateoosoriodelhonte/processpilot/internal/ai"
 	"github.com/mateoosoriodelhonte/processpilot/internal/analysis"
@@ -79,7 +80,7 @@ func (client *Client) status(ctx context.Context, output io.Writer) error {
 		return err
 	}
 	fmt.Fprintf(output, "ProcessPilot: live (local only)\nPressure: %s — %s\nCPU: %.1f%%\nMemory: %s / %s\nDemo data: %s\n",
-		response.Data.Pressure.Level, response.Data.Pressure.Summary, response.Data.Observed.CPUPercent,
+		terminalSafe(string(response.Data.Pressure.Level)), terminalSafe(response.Data.Pressure.Summary), response.Data.Observed.CPUPercent,
 		formatBytes(response.Data.Observed.UsedMemoryBytes), formatBytes(response.Data.Observed.TotalMemoryBytes), yesNo(response.Data.Demo))
 	return nil
 }
@@ -97,8 +98,8 @@ func (client *Client) top(ctx context.Context, output io.Writer) error {
 	}
 	fmt.Fprintln(output, "APPLICATION\tCPU\tMEMORY\tPROCESSES\tRISK")
 	for _, application := range response.Data {
-		fmt.Fprintf(output, "%s\t%.1f%%\t%s\t%d\t%s\n", application.Name, application.CPUPercent,
-			formatBytes(application.MemoryBytes), application.ProcessCount, application.Risk)
+		fmt.Fprintf(output, "%s\t%.1f%%\t%s\t%d\t%s\n", terminalSafe(application.Name), application.CPUPercent,
+			formatBytes(application.MemoryBytes), application.ProcessCount, terminalSafe(string(application.Risk)))
 	}
 	return nil
 }
@@ -109,11 +110,11 @@ func (client *Client) inspect(ctx context.Context, pid uint32, output io.Writer)
 		return err
 	}
 	fmt.Fprintf(output, "Observed\n  PID: %d\n  Name: %s\n  CPU: %.1f%%\n  Memory: %s\n  State: %s\n\n",
-		response.Observed.PID, response.Observed.Name, response.Observed.CPUPercent,
-		formatBytes(response.Observed.MemoryBytes), response.Observed.Status)
-	fmt.Fprintf(output, "ProcessPilot classification\n  Application: %s\n  Category: %s\n  Stopping risk: %s\n  Why: %s\n  Potential impact: %s\n",
-		response.Classification.Application, response.Classification.Category, response.Classification.Risk,
-		response.Classification.Reason, response.Classification.PotentialImpact)
+		response.Observed.PID, terminalSafe(response.Observed.Name), response.Observed.CPUPercent,
+		formatBytes(response.Observed.MemoryBytes), terminalSafe(response.Observed.Status))
+	fmt.Fprintf(output, "ProcessPilot classification\n  Process identity: %s\n  Grouped application: %s\n  Category: %s\n  Stopping risk: %s\n  Why: %s\n  Potential impact: %s\n",
+		terminalSafe(response.Classification.Application), terminalSafe(response.Ownership.Application), terminalSafe(string(response.Classification.Category)), terminalSafe(string(response.Classification.Risk)),
+		terminalSafe(response.Classification.Reason), terminalSafe(response.Classification.PotentialImpact))
 	return nil
 }
 
@@ -122,7 +123,7 @@ func (client *Client) explain(ctx context.Context, pid uint32, output io.Writer)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(output, "%s\nProvider: %s\n", response.Explanation.Text, response.Explanation.Provider)
+	fmt.Fprintf(output, "%s\nProvider: %s\n", terminalSafe(response.Explanation.Text), terminalSafe(response.Explanation.Provider))
 	return nil
 }
 
@@ -165,7 +166,7 @@ func (client *Client) get(ctx context.Context, path string, destination any) err
 		if len(body) > 4<<10 {
 			body = body[:4<<10]
 		}
-		return fmt.Errorf("local API returned HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
+		return fmt.Errorf("local API returned HTTP %d: %s", response.StatusCode, terminalSafe(strings.TrimSpace(string(body))))
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	if err := decoder.Decode(destination); err != nil {
@@ -191,4 +192,14 @@ func yesNo(value bool) string {
 
 func formatBytes(value uint64) string {
 	return fmt.Sprintf("%.1f GiB", float64(value)/float64(uint64(1)<<30))
+}
+
+func terminalSafe(value string) string {
+	value = strings.ToValidUTF8(value, "�")
+	return strings.Map(func(character rune) rune {
+		if unicode.IsControl(character) || unicode.Is(unicode.Cf, character) {
+			return -1
+		}
+		return character
+	}, value)
 }

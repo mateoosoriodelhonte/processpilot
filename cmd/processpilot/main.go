@@ -31,6 +31,8 @@ const (
 	modeDemo = "demo"
 )
 
+var demoAnchor = time.Date(2026, time.August, 20, 12, 0, 0, 0, time.UTC)
+
 type serverConfig struct {
 	mode           string
 	port           int
@@ -205,13 +207,13 @@ func runServer(ctx context.Context, config serverConfig, output io.Writer) error
 	var producer func(context.Context) error
 	var closeStore func() error
 	if config.mode == modeDemo {
-		anchor := time.Now().UTC()
+		anchor := demoAnchor
 		demoStore := demo.NewStore(anchor)
 		service = app.NewService(demoStore, ai.NoAIProvider{}, true)
 		if err := service.Accept(ctx, demo.Snapshot(anchor, 1)); err != nil {
 			return fmt.Errorf("initialize demo data: %w", err)
 		}
-		producer = demoProducer(service, config.interval, 1)
+		producer = demoProducer(service, config.interval, anchor, 1)
 	} else {
 		service, producer, closeStore, err = liveRuntime(ctx, config)
 		if err != nil {
@@ -353,7 +355,7 @@ func resolveCollectorPath(executable string) (string, error) {
 	return collectorPath, nil
 }
 
-func demoProducer(service *app.Service, interval time.Duration, sequence uint64) func(context.Context) error {
+func demoProducer(service *app.Service, interval time.Duration, anchor time.Time, sequence uint64) func(context.Context) error {
 	return func(ctx context.Context) error {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
@@ -361,9 +363,9 @@ func demoProducer(service *app.Service, interval time.Duration, sequence uint64)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case at := <-ticker.C:
+			case <-ticker.C:
 				sequence++
-				if err := service.Accept(ctx, demo.Snapshot(at.UTC(), sequence)); err != nil {
+				if err := service.Accept(ctx, demo.Snapshot(anchor.Add(time.Duration(sequence-1)*interval), sequence)); err != nil {
 					return err
 				}
 			}

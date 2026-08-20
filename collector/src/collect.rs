@@ -101,6 +101,7 @@ impl TelemetryCollector {
                 load_average_15: finite_non_negative(load.fifteen),
                 logical_cpu_count,
             },
+            processes_truncated: false,
             processes,
         })
     }

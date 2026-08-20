@@ -28,10 +28,46 @@ fn redacts_obvious_secret_arguments_and_assignments() {
 }
 
 #[test]
+fn redacts_authorization_assignments() {
+    let sanitized = sanitize_process_name("worker Authorization=Bearer secret-value");
+
+    assert!(!sanitized.contains("secret-value"));
+    assert!(sanitized.contains("[REDACTED]"));
+
+    let compact = sanitize_process_name("worker Authorization:Bearer secret-value");
+    assert!(!compact.contains("secret-value"));
+}
+
+#[test]
 fn redacts_credentials_embedded_in_urls() {
     let sanitized = sanitize_text("https://alice:password@example.test/v1", 256);
 
     assert_eq!(sanitized, "https://[REDACTED]@example.test/v1");
+}
+
+#[test]
+fn redacts_each_inline_assignment_even_when_another_value_is_already_redacted() {
+    let sanitized = sanitize_text(
+        "worker token=abc https://host/?password=hunter2 mytoken=value",
+        256,
+    );
+
+    assert_eq!(
+        sanitized,
+        "worker token=[REDACTED] https://host/?password=[REDACTED] mytoken=[REDACTED]"
+    );
+    assert!(!sanitized.contains("abc"));
+    assert!(!sanitized.contains("hunter2"));
+    assert!(!sanitized.contains("value"));
+}
+
+#[test]
+fn redacts_values_after_spaced_assignment_delimiters() {
+    assert_eq!(
+        sanitize_text("worker token = abc", 256),
+        "worker token = [REDACTED]"
+    );
+    assert_eq!(sanitize_text("token", 256), "token [REDACTED]");
 }
 
 #[test]
@@ -48,6 +84,26 @@ fn normalizes_private_home_paths_without_reading_the_filesystem() {
         application.as_deref(),
         Some("~/Applications/Ollama.app/Contents/MacOS/ollama")
     );
+}
+
+#[test]
+fn normalizes_aliases_dot_segments_and_unrecognized_private_paths() {
+    let data_home = sanitize_executable_path(Path::new(
+        "/System/Volumes/Data/Users/alice/private-project/bin/worker",
+    ));
+    let dot_segments = sanitize_executable_path(Path::new(
+        "/Users/alice/Applications/../private-project/bin/worker",
+    ));
+    let padded_dot_segments = sanitize_executable_path(Path::new(
+        "/Users/alice/Applications/.. /private-project/bin/worker",
+    ));
+    let private_volume =
+        sanitize_executable_path(Path::new("/Volumes/PrivateClient/project/bin/worker"));
+
+    assert_eq!(data_home.as_deref(), Some("~/<private>/worker"));
+    assert_eq!(dot_segments.as_deref(), Some("~/<private>/worker"));
+    assert_eq!(padded_dot_segments.as_deref(), Some("~/<private>/worker"));
+    assert_eq!(private_volume.as_deref(), Some("/<private>/worker"));
 }
 
 #[test]

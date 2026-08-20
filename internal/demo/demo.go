@@ -65,7 +65,7 @@ func NewStore(anchor time.Time) *Store {
 	history := make([]analysis.HistoryPoint, 0, len(values))
 	for _, value := range values {
 		history = append(history, analysis.HistoryPoint{
-			Timestamp: anchor.Add(-value.ago), Application: value.application,
+			Timestamp: anchor.Add(-value.ago), Key: "known:" + value.application, Application: value.application,
 			MemoryBytes: value.memory, CPUPercent: value.cpu,
 		})
 	}
@@ -83,20 +83,44 @@ func (*Store) Record(context.Context, protocol.Snapshot, analysis.Result) error 
 func (*Store) Cleanup(context.Context, time.Time) (int64, error) { return 0, nil }
 
 func (store *Store) AllApplicationHistory(_ context.Context, since time.Time, limit int) ([]analysis.HistoryPoint, error) {
-	return store.filtered("", since, limit), nil
+	return store.filtered("", "", since, limit), nil
 }
 
 func (store *Store) ApplicationHistory(_ context.Context, application string, since time.Time, limit int) ([]analysis.HistoryPoint, error) {
-	return store.filtered(application, since, limit), nil
+	return store.filtered(application, "", since, limit), nil
 }
 
-func (store *Store) filtered(application string, since time.Time, limit int) []analysis.HistoryPoint {
+func (store *Store) ApplicationKeyHistory(_ context.Context, applicationKey string, since time.Time, limit int) ([]analysis.HistoryPoint, error) {
+	return store.filtered("", applicationKey, since, limit), nil
+}
+
+func (store *Store) AnomalyHistory(_ context.Context, since time.Time, samplesPerApplication int, applicationKeys []string) ([]analysis.HistoryPoint, error) {
+	allowed := make(map[string]bool, len(applicationKeys))
+	for _, key := range applicationKeys {
+		allowed[key] = true
+	}
+	counts := make(map[string]int, len(applicationKeys))
+	var result []analysis.HistoryPoint
+	for index := len(store.history) - 1; index >= 0; index-- {
+		point := store.history[index]
+		if point.Timestamp.Before(since) || !allowed[point.Key] || counts[point.Key] >= samplesPerApplication {
+			continue
+		}
+		counts[point.Key]++
+		result = append(result, point)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Timestamp.Before(result[j].Timestamp) })
+	return result, nil
+}
+
+func (store *Store) filtered(application, applicationKey string, since time.Time, limit int) []analysis.HistoryPoint {
 	if limit <= 0 {
 		return nil
 	}
 	result := make([]analysis.HistoryPoint, 0, min(limit, len(store.history)))
-	for _, point := range store.history {
-		if point.Timestamp.Before(since) || (application != "" && point.Application != application) {
+	for index := len(store.history) - 1; index >= 0; index-- {
+		point := store.history[index]
+		if point.Timestamp.Before(since) || (application != "" && point.Application != application) || (applicationKey != "" && point.Key != applicationKey) {
 			continue
 		}
 		result = append(result, point)
@@ -104,5 +128,6 @@ func (store *Store) filtered(application string, since time.Time, limit int) []a
 			break
 		}
 	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Timestamp.Before(result[j].Timestamp) })
 	return result
 }

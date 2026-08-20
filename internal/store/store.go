@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -69,6 +70,9 @@ func (s *Store) Record(ctx context.Context, snapshot protocol.Snapshot, result a
 		return errors.New("snapshot timestamp exceeds SQLite integer range")
 	}
 	timestamp := int64(snapshot.TimestampUnixMS)
+	if timestamp > time.Now().UTC().Add(5*time.Minute).UnixMilli() {
+		return errors.New("snapshot timestamp is implausibly far in the future")
+	}
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	if s.lastRecordedMS > 0 && timestamp < s.lastRecordedMS+HistoryInterval.Milliseconds() {
@@ -96,6 +100,9 @@ func (s *Store) Record(ctx context.Context, snapshot protocol.Snapshot, result a
 	}
 
 	applications := result.Applications
+	if snapshot.ProcessesTruncated {
+		applications = nil
+	}
 	if len(applications) > MaximumHistoricalApplications {
 		applications = applications[:MaximumHistoricalApplications]
 	}
@@ -124,9 +131,9 @@ func (s *Store) ApplicationHistory(ctx context.Context, application string, sinc
 		return nil, errors.New("history limit must be between 1 and 10000")
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT timestamp_ms, application, memory_bytes, cpu_percent
+		SELECT timestamp_ms, app_key, application, memory_bytes, cpu_percent
 		FROM (
-			SELECT timestamp_ms, application, memory_bytes, cpu_percent
+			SELECT timestamp_ms, app_key, application, memory_bytes, cpu_percent
 			FROM application_samples
 			WHERE application = ? AND timestamp_ms >= ?
 			ORDER BY timestamp_ms DESC
@@ -137,21 +144,28 @@ func (s *Store) ApplicationHistory(ctx context.Context, application string, sinc
 		return nil, fmt.Errorf("query application history: %w", err)
 	}
 	defer rows.Close()
+	return scanHistory(rows)
+}
 
-	var history []analysis.HistoryPoint
-	for rows.Next() {
-		var timestampMS int64
-		var point analysis.HistoryPoint
-		if err := rows.Scan(&timestampMS, &point.Application, &point.MemoryBytes, &point.CPUPercent); err != nil {
-			return nil, fmt.Errorf("scan application history: %w", err)
-		}
-		point.Timestamp = time.UnixMilli(timestampMS).UTC()
-		history = append(history, point)
+func (s *Store) ApplicationKeyHistory(ctx context.Context, applicationKey string, since time.Time, limit int) ([]analysis.HistoryPoint, error) {
+	if limit < 1 || limit > 10_000 {
+		return nil, errors.New("history limit must be between 1 and 10000")
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate application history: %w", err)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT timestamp_ms, app_key, application, memory_bytes, cpu_percent
+		FROM (
+			SELECT timestamp_ms, app_key, application, memory_bytes, cpu_percent
+			FROM application_samples
+			WHERE app_key = ? AND timestamp_ms >= ?
+			ORDER BY timestamp_ms DESC
+			LIMIT ?
+		)
+		ORDER BY timestamp_ms ASC`, applicationKey, since.UnixMilli(), limit)
+	if err != nil {
+		return nil, fmt.Errorf("query application-key history: %w", err)
 	}
-	return history, nil
+	defer rows.Close()
+	return scanHistory(rows)
 }
 
 func (s *Store) AllApplicationHistory(ctx context.Context, since time.Time, limit int) ([]analysis.HistoryPoint, error) {
@@ -159,9 +173,9 @@ func (s *Store) AllApplicationHistory(ctx context.Context, since time.Time, limi
 		return nil, errors.New("history limit must be between 1 and 100000")
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT timestamp_ms, application, memory_bytes, cpu_percent
+		SELECT timestamp_ms, app_key, application, memory_bytes, cpu_percent
 		FROM (
-			SELECT timestamp_ms, application, memory_bytes, cpu_percent
+			SELECT timestamp_ms, app_key, application, memory_bytes, cpu_percent
 			FROM application_samples
 			WHERE timestamp_ms >= ?
 			ORDER BY timestamp_ms DESC, application DESC
@@ -172,19 +186,62 @@ func (s *Store) AllApplicationHistory(ctx context.Context, since time.Time, limi
 		return nil, fmt.Errorf("query history: %w", err)
 	}
 	defer rows.Close()
+	return scanHistory(rows)
+}
 
+func (s *Store) AnomalyHistory(ctx context.Context, since time.Time, samplesPerApplication int, applicationKeys []string) ([]analysis.HistoryPoint, error) {
+	if samplesPerApplication < 1 || samplesPerApplication > 100 {
+		return nil, errors.New("anomaly samples per application must be between 1 and 100")
+	}
+	if len(applicationKeys) == 0 {
+		return nil, nil
+	}
+	if len(applicationKeys) > 100 {
+		return nil, errors.New("anomaly application count must not exceed 100")
+	}
+	history := make([]analysis.HistoryPoint, 0, len(applicationKeys)*samplesPerApplication)
+	for _, key := range applicationKeys {
+		rows, err := s.db.QueryContext(ctx, `
+			SELECT timestamp_ms, app_key, application, memory_bytes, cpu_percent
+			FROM application_samples
+			WHERE app_key = ? AND timestamp_ms >= ?
+			ORDER BY timestamp_ms DESC
+			LIMIT ?`, key, since.UnixMilli(), samplesPerApplication)
+		if err != nil {
+			return nil, fmt.Errorf("query anomaly history for application identity: %w", err)
+		}
+		points, scanErr := scanHistory(rows)
+		closeErr := rows.Close()
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("close anomaly history rows: %w", closeErr)
+		}
+		history = append(history, points...)
+	}
+	sort.Slice(history, func(i, j int) bool {
+		if history[i].Timestamp.Equal(history[j].Timestamp) {
+			return history[i].Key < history[j].Key
+		}
+		return history[i].Timestamp.Before(history[j].Timestamp)
+	})
+	return history, nil
+}
+
+func scanHistory(rows *sql.Rows) ([]analysis.HistoryPoint, error) {
 	var history []analysis.HistoryPoint
 	for rows.Next() {
 		var timestampMS int64
 		var point analysis.HistoryPoint
-		if err := rows.Scan(&timestampMS, &point.Application, &point.MemoryBytes, &point.CPUPercent); err != nil {
-			return nil, fmt.Errorf("scan history: %w", err)
+		if err := rows.Scan(&timestampMS, &point.Key, &point.Application, &point.MemoryBytes, &point.CPUPercent); err != nil {
+			return nil, fmt.Errorf("scan application history: %w", err)
 		}
 		point.Timestamp = time.UnixMilli(timestampMS).UTC()
 		history = append(history, point)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate history: %w", err)
+		return nil, fmt.Errorf("iterate application history: %w", err)
 	}
 	return history, nil
 }
@@ -301,6 +358,10 @@ var migrations = []migration{
 		version: 3,
 		sql:     `DROP TABLE IF EXISTS process_samples;`,
 	},
+	{
+		version: 4,
+		sql:     `CREATE INDEX application_samples_key_lookup ON application_samples(app_key, timestamp_ms DESC);`,
+	},
 }
 
 func migrate(db *sql.DB) error {
@@ -313,6 +374,10 @@ func migrate(db *sql.DB) error {
 	var current int
 	if err := db.QueryRow("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").Scan(&current); err != nil {
 		return fmt.Errorf("read migration version: %w", err)
+	}
+	latestSupported := migrations[len(migrations)-1].version
+	if current > latestSupported {
+		return fmt.Errorf("database schema version %d is newer than supported version %d", current, latestSupported)
 	}
 	for _, migration := range migrations {
 		if migration.version <= current {

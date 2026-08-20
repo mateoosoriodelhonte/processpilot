@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use processpilot_collector::collect::TelemetryCollector;
 use processpilot_collector::config::parse_args;
+use processpilot_collector::protocol::encode_bounded_snapshot;
 use sysinfo::MINIMUM_CPU_UPDATE_INTERVAL;
 
 fn main() -> ExitCode {
@@ -29,7 +30,7 @@ fn run() -> Result<(), Box<dyn Error>> {
 
     loop {
         let snapshot = collector.sample()?;
-        serde_json::to_writer(&mut output, &snapshot)?;
+        output.write_all(&encode_bounded_snapshot(snapshot)?)?;
         writeln!(output)?;
         output.flush()?;
 

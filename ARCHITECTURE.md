@@ -18,7 +18,7 @@ The collector accepts only `--once` or a bounded `--interval-ms`. It has no stdi
 
 Go resolves exactly one regular executable named `processpilot-collector` beside its own resolved binary. It launches that path directly with fixed arguments—never through a shell—and discards collector stderr to avoid accidental telemetry logging.
 
-Stdout is treated as untrusted. The decoder enforces a 4 MiB line limit, strict JSON fields, protocol version 1, finite/ranged metrics, bounded strings and process counts, unique PIDs, valid hierarchy basics, and SQLite-safe integer ranges. A malformed stream stops ingestion rather than widening access or retrying with another collector.
+Stdout is treated as untrusted. The decoder enforces a 4 MiB line limit, valid UTF-8, unique JSON keys, required strict fields, protocol version 1, plausible timestamps, monotonic sequence, finite/ranged metrics, canonical sanitized identities, bounded process counts, unique PIDs, valid hierarchy basics, and SQLite-safe integer/aggregate ranges. A malformed or stale stream stops ingestion rather than widening access or retrying with another collector.
 
 ### Deterministic application service
 
@@ -27,7 +27,7 @@ Every accepted snapshot is classified and published as an immutable state copy. 
 - ordered classification signatures and conservative stopping risk;
 - bounded parent traversal, ownership confidence, and application grouping;
 - deterministic pressure and anomaly rules with measured evidence;
-- subscription fan-out with 32 bounded, latest-value channels;
+- subscription fan-out with 32 bounded, latest-value channels carrying only compact aggregate updates;
 - explanation input construction from an explicit metadata allowlist.
 
 Unknown identities remain unknown and are not merged merely because their names match.
@@ -36,13 +36,13 @@ Unknown identities remain unknown and are not merged merely because their names 
 
 SQLite uses the CGO-free `modernc.org/sqlite` driver, WAL mode, parameterized statements, one connection, explicit migrations, indexed history lookups, and foreign-key cascades.
 
-Current raw process evidence remains memory-only. Once per minute, ProcessPilot persists the system sample and at most the 100 highest-memory application aggregates. Cleanup is throttled and deletes samples older than the configured one-hour-to-30-day retention; seven days is the default. Database directories use mode `0700` and the database uses `0600`.
+Current raw process evidence remains memory-only. Once per minute, ProcessPilot persists the system sample and at most the 100 highest-memory application aggregates; partial process snapshots persist no application aggregate. Anomaly reads are cached for one minute and globally bounded to the latest ten samples for each of at most the current top 100 application identities, supported by an identity/timestamp index. Cleanup is throttled and deletes samples older than the configured one-hour-to-30-day retention; seven days is the default. Database directories use mode `0700` and the database uses `0600`. Runtime persistence failures degrade history explicitly without discarding the current in-memory snapshot, and a binary refuses a database schema newer than it understands.
 
 ### Local HTTP, UI, SSE, and CLI
 
-The Go server constructs only `127.0.0.1:<port>` addresses; V1 exposes no host flag. Routes are explicit GET allowlists. Query names, pagination, timestamps, limits, and PIDs are validated. Static assets are embedded, local, and dependency-free at runtime.
+The Go server constructs only `127.0.0.1:<port>` addresses; V1 exposes no host flag. Non-loopback Host headers and cross-origin browser requests are rejected. Routes are explicit GET allowlists. Query names, overflow-safe pagination, timestamps, limits, and PIDs are validated. Static assets are embedded, local, and dependency-free at runtime.
 
-Security headers include a self-only Content Security Policy, `nosniff`, no-referrer, frame denial, and no-store behavior for telemetry. SSE sends system pressure, application aggregates, anomalies, timestamp, and demo state—not raw process fields.
+Security headers include a self-only Content Security Policy, `nosniff`, no-referrer, frame denial, and no-store behavior for telemetry. SSE sends system pressure, at most 100 application aggregates without PID lists, bounded anomalies, truncation status, timestamp, and demo state—not raw process fields. Browser JavaScript reports when a newer snapshot is available instead of mutating only part of a server-rendered state.
 
 The CLI has four fixed read-only commands and a redirect-denying, size-bounded localhost HTTP client.
 

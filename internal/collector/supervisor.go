@@ -24,9 +24,10 @@ var ErrCollectorOutput = errors.New("invalid collector output")
 type commandFunc func(context.Context, string, ...string) *exec.Cmd
 
 type Supervisor struct {
-	collectorPath string
-	intervalMS    int64
-	execCommand   commandFunc
+	collectorPath   string
+	intervalMS      int64
+	livenessTimeout time.Duration
+	execCommand     commandFunc
 }
 
 func NewSupervisor(collectorPath string, interval time.Duration) (*Supervisor, error) {
@@ -38,9 +39,10 @@ func NewSupervisor(collectorPath string, interval time.Duration) (*Supervisor, e
 	}
 
 	return &Supervisor{
-		collectorPath: filepath.Clean(collectorPath),
-		intervalMS:    interval.Milliseconds(),
-		execCommand:   exec.CommandContext,
+		collectorPath:   filepath.Clean(collectorPath),
+		intervalMS:      interval.Milliseconds(),
+		livenessTimeout: max(30*time.Second, 3*interval),
+		execCommand:     exec.CommandContext,
 	}, nil
 }
 
@@ -70,7 +72,9 @@ func (s *Supervisor) Stream(ctx context.Context, handle func(protocol.Snapshot) 
 }
 
 func (s *Supervisor) run(ctx context.Context, once bool, handle func(protocol.Snapshot) error) error {
-	command := s.command(ctx, once)
+	runContext, cancel := context.WithCancel(ctx)
+	defer cancel()
+	command := s.command(runContext, once)
 	stdout, err := command.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("open collector stdout: %w", err)
@@ -80,17 +84,72 @@ func (s *Supervisor) run(ctx context.Context, once bool, handle func(protocol.Sn
 		return fmt.Errorf("start trusted collector: %w", err)
 	}
 
-	ingestErr := ingest(stdout, handle)
+	activity := make(chan struct{}, 1)
+	ingestDone := make(chan error, 1)
+	go func() {
+		ingestDone <- ingest(stdout, func(snapshot protocol.Snapshot) error {
+			select {
+			case activity <- struct{}{}:
+			default:
+			}
+			return handle(snapshot)
+		})
+	}()
+	timer := time.NewTimer(s.livenessTimeout)
+	defer timer.Stop()
+	var ingestErr error
+	for {
+		select {
+		case ingestErr = <-ingestDone:
+			goto finished
+		case <-activity:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(s.livenessTimeout)
+		case <-timer.C:
+			cancel()
+			_ = stdout.Close()
+			go func() { _ = command.Wait() }()
+			return fmt.Errorf("%w: collector emitted no complete snapshot within %s", ErrCollectorOutput, s.livenessTimeout)
+		case <-ctx.Done():
+			cancel()
+			_ = stdout.Close()
+			go func() { _ = command.Wait() }()
+			return ctx.Err()
+		}
+	}
+
+finished:
 	_ = stdout.Close()
-	waitErr := command.Wait()
+	if ingestErr != nil {
+		cancel()
+	}
+	waitDone := make(chan error, 1)
+	go func() { waitDone <- command.Wait() }()
+	waitTimer := time.NewTimer(s.livenessTimeout)
+	defer waitTimer.Stop()
+	var waitErr error
+	select {
+	case waitErr = <-waitDone:
+	case <-waitTimer.C:
+		cancel()
+		return fmt.Errorf("%w: collector did not exit within %s after closing its output", ErrCollectorOutput, s.livenessTimeout)
+	case <-ctx.Done():
+		cancel()
+		return ctx.Err()
+	}
 	if ingestErr != nil {
 		return ingestErr
 	}
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
 	if waitErr != nil {
 		return fmt.Errorf("trusted collector exited unsuccessfully: %w", waitErr)
+	}
+	if !once {
+		return errors.New("trusted collector stream ended unexpectedly")
 	}
 	return nil
 }
@@ -104,17 +163,22 @@ func (s *Supervisor) command(ctx context.Context, once bool) *exec.Cmd {
 
 func ingest(reader io.Reader, handle func(protocol.Snapshot) error) error {
 	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 64*1024), protocol.MaxLineBytes)
+	scanner.Buffer(make([]byte, 64*1024), protocol.MaxLineBytes+64*1024)
 	line := 0
+	var previousSequence uint64
 	for scanner.Scan() {
 		line++
 		snapshot, err := protocol.Decode(scanner.Bytes())
 		if err != nil {
 			return fmt.Errorf("collector line %d: %w", line, err)
 		}
+		if previousSequence > 0 && snapshot.Sequence <= previousSequence {
+			return fmt.Errorf("%w: collector line %d does not advance sequence", ErrCollectorOutput, line)
+		}
 		if err := handle(snapshot); err != nil {
 			return fmt.Errorf("handle collector line %d: %w", line, err)
 		}
+		previousSequence = snapshot.Sequence
 	}
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("%w: %v", ErrCollectorOutput, err)

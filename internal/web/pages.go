@@ -2,10 +2,12 @@ package web
 
 import (
 	"embed"
+	"errors"
 	"fmt"
 	"html/template"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -21,18 +23,21 @@ var webAssets embed.FS
 var templates = parsePageTemplates()
 
 type pageData struct {
-	Title       string
-	Navigation  string
-	State       app.State
-	Process     *analysis.Process
-	Explanation ai.Explanation
-	History     []analysis.HistoryPoint
-	Settings    Settings
+	Title              string
+	Navigation         string
+	State              app.State
+	Process            *analysis.Process
+	Application        *analysis.Application
+	Explanation        ai.Explanation
+	History            []analysis.HistoryPoint
+	HistoryUnavailable bool
+	Settings           Settings
 }
 
 func (server *Server) pageRoutes() {
 	server.mux.HandleFunc("GET /{$}", server.page("overview", "Why is my Mac slow?"))
 	server.mux.HandleFunc("GET /applications", server.page("applications", "Applications"))
+	server.mux.HandleFunc("GET /applications/{key}", server.applicationPage)
 	server.mux.HandleFunc("GET /processes", server.page("processes", "Raw processes"))
 	server.mux.HandleFunc("GET /processes/{pid}", server.processPage)
 	server.mux.HandleFunc("GET /history", server.page("history", "Resource history"))
@@ -44,6 +49,29 @@ func (server *Server) pageRoutes() {
 		panic(err)
 	}
 	server.mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFiles))))
+}
+
+func (server *Server) applicationPage(writer http.ResponseWriter, request *http.Request) {
+	if !validQuery(request, nil) {
+		http.Error(writer, "invalid query", http.StatusBadRequest)
+		return
+	}
+	state, ok := server.service.Current()
+	if !ok {
+		http.Error(writer, "Waiting for the first telemetry snapshot.", http.StatusServiceUnavailable)
+		return
+	}
+	application, ok := server.service.Application(request.PathValue("key"))
+	if !ok {
+		http.NotFound(writer, request)
+		return
+	}
+	currentTime := time.UnixMilli(int64(state.Snapshot.TimestampUnixMS)).UTC()
+	history, err := server.service.ApplicationHistory(request.Context(), application.Key, currentTime.Add(-server.settings.Retention), 240)
+	server.render(writer, "application", pageData{
+		Title: application.Name, Navigation: "applications", State: state,
+		Application: &application, History: history, HistoryUnavailable: err != nil, Settings: server.settings,
+	})
 }
 
 func (server *Server) page(name, title string) http.HandlerFunc {
@@ -59,7 +87,8 @@ func (server *Server) page(name, title string) http.HandlerFunc {
 		}
 		data := pageData{Title: title, Navigation: name, State: state, Settings: server.settings}
 		if name == "history" {
-			history, err := server.service.History(request.Context(), "", time.Now().UTC().Add(-24*time.Hour), 2_000)
+			currentTime := time.UnixMilli(int64(state.Snapshot.TimestampUnixMS)).UTC()
+			history, err := server.service.History(request.Context(), "", currentTime.Add(-24*time.Hour), 2_000)
 			if err != nil {
 				http.Error(writer, "History is temporarily unavailable.", http.StatusInternalServerError)
 				return
@@ -85,13 +114,12 @@ func (server *Server) processPage(writer http.ResponseWriter, request *http.Requ
 		http.Error(writer, "Waiting for the first telemetry snapshot.", http.StatusServiceUnavailable)
 		return
 	}
-	process, ok := server.service.Process(uint32(parsed))
-	if !ok {
-		http.NotFound(writer, request)
-		return
-	}
-	explanation, err := server.service.Explain(request.Context(), uint32(parsed))
+	process, explanation, err := server.service.ProcessDetail(request.Context(), uint32(parsed))
 	if err != nil {
+		if errors.Is(err, app.ErrProcessNotFound) {
+			http.NotFound(writer, request)
+			return
+		}
 		http.Error(writer, "Explanation is temporarily unavailable.", http.StatusServiceUnavailable)
 		return
 	}
@@ -124,9 +152,10 @@ func parsePageTemplates() map[string]*template.Template {
 		"label": func(value any) string {
 			return strings.ReplaceAll(strings.ToLower(fmt.Sprint(value)), "_", " ")
 		},
+		"pathSegment": url.PathEscape,
 	}
 	result := make(map[string]*template.Template)
-	for _, name := range []string{"overview", "applications", "processes", "process", "history", "anomalies", "privacy", "settings"} {
+	for _, name := range []string{"overview", "applications", "application", "processes", "process", "history", "anomalies", "privacy", "settings"} {
 		result[name] = template.Must(template.New("base").Funcs(functions).ParseFS(
 			webAssets, "templates/base.html", "templates/"+name+".html",
 		))
@@ -149,11 +178,11 @@ func formatBytes(value uint64) string {
 	)
 	switch {
 	case value >= gib:
-		return fmt.Sprintf("%.1f GB", float64(value)/float64(gib))
+		return fmt.Sprintf("%.1f GiB", float64(value)/float64(gib))
 	case value >= mib:
-		return fmt.Sprintf("%.0f MB", float64(value)/float64(mib))
+		return fmt.Sprintf("%.0f MiB", float64(value)/float64(mib))
 	case value >= kib:
-		return fmt.Sprintf("%.0f KB", float64(value)/float64(kib))
+		return fmt.Sprintf("%.0f KiB", float64(value)/float64(kib))
 	default:
 		return fmt.Sprintf("%d B", value)
 	}

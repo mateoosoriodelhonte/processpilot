@@ -51,6 +51,15 @@ func TestUnknownProcessRemainsConservativeAndUnknown(t *testing.T) {
 	}
 }
 
+func TestClassificationDoesNotMatchIncidentalSubstrings(t *testing.T) {
+	for _, name := range []string{"not-ollama", "postgres-backup", "docker-notes", "my-firefox-export"} {
+		classification := Classify(sampleProcess(99, name, "~/<private>/"+name))
+		if classification.Category != CategoryUnknown || classification.Risk != RiskUnknown {
+			t.Fatalf("Classify(%q) = %#v, want conservative unknown", name, classification)
+		}
+	}
+}
+
 func sampleProcess(pid uint32, name, executable string) protocol.ProcessSample {
 	return protocol.ProcessSample{
 		PID:                  pid,

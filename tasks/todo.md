@@ -28,10 +28,10 @@
 
 ## Standing Definition of Done
 
-- [ ] Acceptance criteria and negative security criteria pass.
-- [ ] Runtime behavior is verified, not only compiled.
-- [ ] New behavior has tests that fail without it and pass with it.
-- [ ] Formatting, linting, tests, builds, and integration checks are green.
-- [ ] Public behavior, contracts, and architectural decisions are documented.
-- [ ] Final diff contains only intended work and no secrets or generated build output.
-- [ ] Security, privacy, observability, rollback/removal, and compatibility are reviewed.
+- [x] Acceptance criteria and negative security criteria pass.
+- [x] Runtime behavior is verified, not only compiled.
+- [x] New behavior has tests that fail without it and pass with it.
+- [x] Formatting, linting, tests, builds, and integration checks are green.
+- [x] Public behavior, contracts, and architectural decisions are documented.
+- [x] Final diff contains only intended work and no secrets or generated build output.
+- [x] Security, privacy, observability, rollback/removal, and compatibility are reviewed.

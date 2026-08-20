@@ -17,6 +17,7 @@ const (
 
 type HistoryPoint struct {
 	Timestamp   time.Time `json:"timestamp"`
+	Key         string    `json:"-"`
 	Application string    `json:"application"`
 	MemoryBytes uint64    `json:"memoryBytes"`
 	CPUPercent  float64   `json:"cpuPercent"`
@@ -33,7 +34,7 @@ type Anomaly struct {
 func DetectAnomalies(history []HistoryPoint, current []Application, totalMemory uint64, now time.Time) []Anomaly {
 	byApplication := make(map[string][]HistoryPoint)
 	for _, point := range history {
-		byApplication[point.Application] = append(byApplication[point.Application], point)
+		byApplication[historyKey(point.Key, point.Application)] = append(byApplication[historyKey(point.Key, point.Application)], point)
 	}
 	for application := range byApplication {
 		sort.Slice(byApplication[application], func(i, j int) bool {
@@ -43,30 +44,30 @@ func DetectAnomalies(history []HistoryPoint, current []Application, totalMemory 
 
 	var anomalies []Anomaly
 	for _, application := range current {
-		points := byApplication[application.Name]
-		if len(points) == 0 && totalMemory > 0 && application.MemoryBytes >= 1<<30 && float64(application.MemoryBytes)/float64(totalMemory) >= 0.10 {
+		points := byApplication[historyKey(application.Key, application.Name)]
+		if len(history) > 0 && len(points) == 0 && totalMemory > 0 && application.MemoryBytes >= 1<<30 && float64(application.MemoryBytes)/float64(totalMemory) >= 0.10 {
 			anomalies = append(anomalies, Anomaly{
 				Kind: AnomalyNewMajorConsumer, Application: application.Name, DetectedAt: now,
 				Rule:     "An application absent from retained history uses at least 1 GiB and 10% of physical memory.",
 				Evidence: fmt.Sprintf("Current memory is %.2f GiB (%.1f%% of physical RAM).", gibibytes(application.MemoryBytes), float64(application.MemoryBytes)/float64(totalMemory)*100),
 			})
 		}
-		if len(points) >= 4 && memorySpike(points, application.MemoryBytes) {
-			baseline := averageMemory(last(points, 10))
+		if len(points) >= 4 && hasConsecutiveEvidence(points, now, 4) && memorySpike(points, application.MemoryBytes) {
+			baseline := averageMemory(last(points, 4))
 			anomalies = append(anomalies, Anomaly{
 				Kind: AnomalyMemorySpike, Application: application.Name, DetectedAt: now,
 				Rule:     "Current memory is at least 1.75× the recent average and at least 512 MiB above it.",
 				Evidence: fmt.Sprintf("Current %.2f GiB; recent average %.2f GiB.", gibibytes(application.MemoryBytes), gibibytes(baseline)),
 			})
 		}
-		if len(points) >= 2 && sustainedCPU(points, application.CPUPercent) {
+		if len(points) >= 2 && hasConsecutiveEvidence(points, now, 2) && sustainedCPU(points, application.CPUPercent) {
 			anomalies = append(anomalies, Anomaly{
 				Kind: AnomalySustainedCPU, Application: application.Name, DetectedAt: now,
 				Rule:     "CPU is at least 80% in the current sample and two consecutive retained samples.",
 				Evidence: fmt.Sprintf("Latest three CPU samples are %.1f%%, %.1f%%, and %.1f%%.", points[len(points)-2].CPUPercent, points[len(points)-1].CPUPercent, application.CPUPercent),
 			})
 		}
-		if len(points) >= 4 && memoryGrowth(points, application.MemoryBytes) {
+		if len(points) >= 4 && hasConsecutiveEvidence(points, now, 4) && memoryGrowth(points, application.MemoryBytes) {
 			start := points[len(points)-4].MemoryBytes
 			anomalies = append(anomalies, Anomaly{
 				Kind: AnomalyMemoryGrowth, Application: application.Name, DetectedAt: now,
@@ -85,8 +86,29 @@ func DetectAnomalies(history []HistoryPoint, current []Application, totalMemory 
 	return anomalies
 }
 
+func historyKey(key, application string) string {
+	if key != "" {
+		return key
+	}
+	return "display:" + application
+}
+
+func hasConsecutiveEvidence(points []HistoryPoint, now time.Time, count int) bool {
+	recent := last(points, count)
+	if len(recent) < count || now.Before(recent[len(recent)-1].Timestamp) || now.Sub(recent[len(recent)-1].Timestamp) > 2*time.Minute {
+		return false
+	}
+	for index := 1; index < len(recent); index++ {
+		gap := recent[index].Timestamp.Sub(recent[index-1].Timestamp)
+		if gap <= 0 || gap > 2*time.Minute {
+			return false
+		}
+	}
+	return true
+}
+
 func memorySpike(points []HistoryPoint, current uint64) bool {
-	baseline := averageMemory(last(points, 10))
+	baseline := averageMemory(last(points, 4))
 	return baseline > 0 && float64(current) >= float64(baseline)*1.75 && current >= baseline+512<<20
 }
 

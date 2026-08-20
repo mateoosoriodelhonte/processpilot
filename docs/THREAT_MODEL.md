@@ -36,17 +36,17 @@ Operating-system process data is treated as untrusted text and potentially incon
 
 ### Rust subprocess to Go
 
-Go launches one resolved regular sibling named `processpilot-collector` with fixed arguments and no shell. Stdout is a one-way channel. Go applies its own 4 MiB, strict-schema, version, range, length, cardinality, and identity validation. A malformed line stops ingestion. No browser/API/model value can reach collector arguments.
+Go launches one resolved regular sibling named `processpilot-collector` with fixed arguments and no shell. Stdout is a one-way channel. Go applies its own 4 MiB, UTF-8, duplicate-key, required-field, strict-schema, version, timestamp-plausibility, sequence, range, length, cardinality, and canonical-identity validation. Replayed sequences stop ingestion; wall-clock corrections do not. Missing complete snapshots exceed a bounded liveness deadline and stop the collector path clearly. No browser/API/model value can reach collector arguments.
 
 ### Localhost HTTP
 
-The listener address is constructed as `127.0.0.1:<validated-port>`; there is no host option. Routes and methods are explicit GET allowlists. Query keys and values are validated. Static files come only from an embedded filesystem. Arbitrary filesystem paths, process control, and commands have no route.
+The listener address is constructed as `127.0.0.1:<validated-port>`; there is no host option. Requests with a non-loopback `Host` or cross-origin `Origin` are rejected to narrow DNS-rebinding and reverse-proxy exposure. Routes and methods are explicit GET allowlists. Query keys and values are validated. Static files come only from an embedded filesystem. Arbitrary filesystem paths, process control, and commands have no route.
 
-Telemetry responses are no-store and receive CSP, frame, MIME-sniffing, and referrer protections. SSE carries aggregate summaries only and caps concurrent subscribers.
+Telemetry responses are no-store and receive CSP, frame, MIME-sniffing, and referrer protections. SSE carries at most the top 100 aggregate summaries without PID lists and caps concurrent subscribers.
 
 ### SQLite
 
-Only application-owned absolute database paths are used in production. Statements are parameterized, migrations are transactional, values are validated before storage, history reads have hard limits, collection is downsampled, and retention is bounded. Raw process tables are removed by migration 3.
+Only application-owned absolute database paths are used in production. Statements are parameterized, migrations are transactional, newer unsupported schema versions fail closed, values are validated before storage, history reads have hard limits, collection is downsampled, and retention is bounded. Raw process tables are removed by migration 3; migration 4 adds the bounded anomaly-key index. Partial process snapshots never contribute application history. A runtime persistence error produces an explicit degraded-history state while current read-only telemetry remains available.
 
 ### AI
 
@@ -73,7 +73,7 @@ Redaction cannot guarantee that a malicious process name contains no secret; thi
 
 | Threat | Mitigation |
 | --- | --- |
-| Public telemetry exposure | Literal loopback construction, no host flag, bind regression tests |
+| Public telemetry exposure | Literal loopback construction, loopback Host/Origin validation, no host flag, regression tests |
 | Shell/command injection | No shell; only fixed sibling exec; no command route or field |
 | Process control | No owned control API, signal call, UI button, or CLI command; static regression scan |
 | Path traversal | Embedded static FS, explicit routes, no user filesystem path, traversal probes |
@@ -83,7 +83,7 @@ Redaction cannot guarantee that a malicious process name contains no secret; thi
 | AI prompt injection | Model output is inert text; no action/tool interface |
 | Cross-site framing/script injection | CSP, frame denial, escaped templates, local static assets |
 | False confidence | Unknown remains unknown; risk is conservative; evidence and inference are separated |
-| Supply-chain replacement | Locked Rust/Go/npm dependencies, CI, checksums; sibling regular-file validation |
+| Supply-chain replacement | Locked Rust/Go/npm dependencies, immutable CI action SHAs, vulnerability gates, checksums; sibling regular-file validation |
 
 ## Known limitations and residual risk
 

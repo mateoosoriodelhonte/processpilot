@@ -22,6 +22,7 @@ func TestDashboardPagesRenderSemanticDemoLabeledContent(t *testing.T) {
 	}{
 		{path: "/", text: "Why is my Mac slow?"},
 		{path: "/applications", text: "Applications"},
+		{path: "/applications/known%3AOllama", text: "Application detail"},
 		{path: "/processes", text: "Raw processes"},
 		{path: "/processes/10", text: "ProcessPilot classification"},
 		{path: "/history", text: "Resource history"},
@@ -33,7 +34,7 @@ func TestDashboardPagesRenderSemanticDemoLabeledContent(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
-			handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, tt.path, nil))
+			handler.ServeHTTP(recorder, localRequest(http.MethodGet, tt.path, nil))
 			if recorder.Code != http.StatusOK {
 				t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
 			}
@@ -52,7 +53,7 @@ func TestDashboardPagesRenderSemanticDemoLabeledContent(t *testing.T) {
 
 func TestProcessDetailSeparatesEvidenceClassificationAndExplanation(t *testing.T) {
 	recorder := httptest.NewRecorder()
-	testHandler(t).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/processes/10", nil))
+	testHandler(t).ServeHTTP(recorder, localRequest(http.MethodGet, "/processes/10", nil))
 	body := recorder.Body.String()
 
 	observed := strings.Index(body, ">Observed<")
@@ -65,7 +66,7 @@ func TestProcessDetailSeparatesEvidenceClassificationAndExplanation(t *testing.T
 
 func TestPrivacyPageStatesTheConcreteBoundary(t *testing.T) {
 	recorder := httptest.NewRecorder()
-	testHandler(t).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/privacy", nil))
+	testHandler(t).ServeHTTP(recorder, localRequest(http.MethodGet, "/privacy", nil))
 	lower := strings.ToLower(recorder.Body.String())
 
 	for _, phrase := range []string{
@@ -89,7 +90,7 @@ func TestSettingsPageReflectsEffectiveRuntimeConfiguration(t *testing.T) {
 		ExplanationProvider: "Ollama with NoAI fallback",
 	}).Handler()
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/settings", nil))
+	handler.ServeHTTP(recorder, localRequest(http.MethodGet, "/settings", nil))
 	for _, expected := range []string{"3s", "2 days", "Ollama with NoAI fallback", "127.0.0.1"} {
 		if !strings.Contains(recorder.Body.String(), expected) {
 			t.Fatalf("settings page lacks %q: %s", expected, recorder.Body.String())
@@ -100,7 +101,7 @@ func TestSettingsPageReflectsEffectiveRuntimeConfiguration(t *testing.T) {
 func TestStaticAssetsAreLocalAndCSPCompatible(t *testing.T) {
 	for _, path := range []string{"/static/style.css", "/static/app.js"} {
 		recorder := httptest.NewRecorder()
-		testHandler(t).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		testHandler(t).ServeHTTP(recorder, localRequest(http.MethodGet, path, nil))
 		if recorder.Code != http.StatusOK || recorder.Body.Len() == 0 {
 			t.Fatalf("GET %s status=%d size=%d", path, recorder.Code, recorder.Body.Len())
 		}

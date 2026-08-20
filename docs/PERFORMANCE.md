@@ -20,7 +20,7 @@ These are measurements from one development Mac, not universal guarantees. `ps` 
 | Rust collector, live process scan every 2 s | 30 × 1 s | 0.523% | 1.2% | 8,944 KiB | 8,944 KiB |
 | Go demo server, deterministic analysis every 2 s, no browser connected | 30 × 1 s after 5 s warm-up | below `ps` 0.1% resolution | below `ps` 0.1% resolution | 18,137.6 KiB | 18,144 KiB |
 
-The demo server measurement exercises Go state replacement, deterministic analysis, anomaly evaluation, and the local HTTP listener. It excludes live SQLite writes; those are measured independently below.
+The demo server measurement exercises Go state replacement, deterministic analysis, anomaly evaluation, and the local HTTP listener. The complete live ingestion path—including a real collector snapshot, classification, immutable state, bounded anomaly-history reads, downsampled SQLite writes, and cleanup—is measured independently below.
 
 Commands used were equivalent to:
 
@@ -44,15 +44,17 @@ V1 now:
 - keeps the system sample, parameterized/indexed queries, and bounded retention;
 - runs retention cleanup at most once per ten minutes.
 
-The final profile used a fresh real snapshot with 416 processes and 304 application groups. It fed 900 two-second collector snapshots (30 logical minutes), retained 30 one-minute samples, and produced:
+The final post-review profile used a fresh real snapshot with 399 processes and 399 conservatively resolved application identities. It fed 900 two-second collector snapshots (30 logical minutes) through `Service.Accept`, retained 30 one-minute samples, and produced:
 
 | Metric | Measured value |
 | --- | ---: |
-| SQLite database including any WAL/SHM files after close | 450,560 bytes (440 KiB) |
-| Actual write time for the 900 calls / 30 retained transactions | 26 ms |
-| Bytes per retained sample including schema/page overhead | 15,018.7 bytes |
+| SQLite database including any WAL/SHM files after close | 643,072 bytes (628 KiB) |
+| Complete ingestion time for 900 calls / 30 retained transactions | 610 ms (0.68 ms per collector snapshot) |
+| Bytes per retained sample including schema/page overhead | 21,435.7 bytes |
 
-That run was 99.6% smaller than the pre-fix profile, although the live process counts differed slightly between runs. A straight-line estimate at the measured maximum 100 applications is about 144.4 MiB for the default seven-day window; this is an estimate, not a seven-day observation. SQLite page allocation, application count, name lengths, and churn can change actual growth.
+That run was 99.5% smaller than the pre-fix profile, although the live process counts differed slightly between runs. A straight-line estimate at the measured maximum 100 applications is about 206.1 MiB for the default seven-day window; this is an estimate, not a seven-day observation. SQLite page allocation, application count, name lengths, and churn can change actual growth.
+
+Anomaly history is now read at most once per minute and issues an indexed `LIMIT 10` lookup for each of at most the current top 100 retained application identities. It is not loaded on every two-second collector tick. The measured 610 ms includes those globally bounded indexed queries and immutable state publication; the earlier 26 ms figure measured only direct store calls and is retained here solely as the optimization history.
 
 Reproduce the aggregate-only storage measurement after building the release collector:
 
@@ -67,10 +69,10 @@ The tool creates and removes its own temporary database and prints only counts, 
 
 The server-rendered UI has no runtime package/CDN dependency. At V1 measurement:
 
-- JavaScript: 838 bytes (budget: 10 KiB)
-- CSS: 9,838 bytes (budget: 50 KiB)
+- JavaScript: 810 bytes (budget: 10 KiB)
+- CSS: 9,925 bytes (budget: 50 KiB)
 
-`internal/performance/budget_test.go` enforces these uncompressed limits. JavaScript is deferred and only maintains the SSE status/timestamp/pressure enhancement; the pages remain usable without it.
+`internal/performance/budget_test.go` enforces these uncompressed limits. JavaScript is deferred and only maintains the honest local SSE freshness indicator; the pages remain usable without it.
 
 ## Operational guidance
 

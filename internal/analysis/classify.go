@@ -43,48 +43,48 @@ type Classification struct {
 }
 
 func Classify(process protocol.ProcessSample) Classification {
-	name := strings.ToLower(process.Name)
-	executable := ""
+	name := strings.ToLower(strings.TrimSpace(process.Name))
+	executableBase := ""
 	if process.Executable != nil {
-		executable = strings.ToLower(*process.Executable)
+		executableBase = strings.ToLower(filepath.Base(*process.Executable))
 	}
-	identity := name + " " + executable
+	bundle := strings.ToLower(bundleApplication(process))
 
 	if process.PID == 1 || isSystemProcess(name) {
 		return classification("macOS system", CategorySystemService, RiskHigh,
 			"The process matches a core macOS service signature.",
 			"Stopping a system service can destabilize the current session or operating system.")
 	}
-	if containsAny(identity, "ollama", "llama-server", "llama runner") {
+	if matchesExact(name, executableBase, "ollama", "ollama runner", "llama-server") || bundle == "ollama" {
 		return classification("Ollama", CategoryAIInference, RiskMedium,
 			"The executable identity matches a local AI model runtime.",
 			"Stopping it may interrupt active local model inference; it does not uninstall models.")
 	}
-	if containsAny(identity, "qemu-system", "virtualization.virtualmachine", "limactl", "vmware", "parallels") {
+	if matchesExact(name, executableBase, "limactl", "virtualization.virtualmachine", "vmware-vmx", "prl_vm_app") || strings.HasPrefix(name, "qemu-system-") || strings.HasPrefix(executableBase, "qemu-system-") || bundle == "vmware fusion" || bundle == "parallels desktop" {
 		return classification("Virtual machine", CategoryVirtualMachine, RiskHigh,
 			"The process matches a virtual machine worker or controller signature.",
 			"Stopping it may interrupt services, containers, or unsaved work inside the virtual machine.")
 	}
-	if containsAny(identity, "docker", "colima", "containerd") {
-		return classification(applicationName(process, "Container runtime"), CategoryContainerRuntime, RiskHigh,
+	if container, ok := containerIdentity(name, executableBase, bundle); ok {
+		return classification(container, CategoryContainerRuntime, RiskHigh,
 			"The process matches a local container runtime signature.",
 			"Stopping it may interrupt running containers and the applications that depend on them.")
 	}
-	if browser, ok := browserIdentity(identity); ok {
+	if browser, ok := browserIdentity(name, executableBase, bundle); ok {
 		category := CategoryBrowser
-		if containsAny(name, "helper", "webcontent", "plugin-container", "cp ") {
+		if strings.Contains(name, " helper") || strings.Contains(name, "webcontent") || name == "plugin-container" || strings.Contains(name, " cp ") {
 			category = CategoryBrowserHelper
 		}
 		return classification(browser, category, RiskMedium,
 			"The executable identity matches a web browser or one of its helper processes.",
 			"Stopping it may close windows or interrupt downloads, forms, and active web applications.")
 	}
-	if database, ok := databaseIdentity(identity); ok {
+	if database, ok := databaseIdentity(name, executableBase); ok {
 		return classification(database, CategoryDatabase, RiskHigh,
 			"The executable name matches a local database server signature.",
 			"Stopping it may interrupt applications and could disrupt in-progress writes.")
 	}
-	if containsAny(identity, "visual studio code", "code helper", "/code.app/", "/xcode.app/", "/zed.app/") {
+	if matchesExact(name, executableBase, "code", "code helper", "xcode", "zed") || bundle == "visual studio code" || bundle == "xcode" || bundle == "zed" {
 		return classification(applicationName(process, "Code editor"), CategoryIDE, RiskMedium,
 			"The application identity matches a development editor or IDE.",
 			"Stopping it may close editor windows, terminals, or unsaved work.")
@@ -95,7 +95,7 @@ func Classify(process protocol.ProcessSample) Classification {
 			"The process name exactly matches a compiler executable.",
 			"Stopping it normally interrupts the current build and may leave incomplete build output.")
 	}
-	if containsAny(identity, "language-server", "language_server", "rust-analyzer", "gopls", "sourcekit-lsp") {
+	if matchesExact(name, executableBase, "language-server", "language_server", "rust-analyzer", "gopls", "sourcekit-lsp") {
 		return classification(applicationName(process, "Language server"), CategoryLanguageServer, RiskLow,
 			"The process matches a developer language-service signature.",
 			"Stopping it may temporarily disable editor completion, navigation, or diagnostics.")
@@ -109,6 +109,19 @@ func Classify(process protocol.ProcessSample) Classification {
 	return classification(process.Name, CategoryUnknown, RiskUnknown,
 		"ProcessPilot does not have enough safe metadata to identify this process conservatively.",
 		"Do not terminate this process based solely on ProcessPilot.")
+}
+
+func containerIdentity(name, executableBase, bundle string) (string, bool) {
+	switch {
+	case bundle == "docker" || matchesExact(name, executableBase, "docker", "dockerd", "com.docker.backend"):
+		return "Docker", true
+	case bundle == "colima" || matchesExact(name, executableBase, "colima"):
+		return "Colima", true
+	case matchesExact(name, executableBase, "containerd"):
+		return "containerd", true
+	default:
+		return "", false
+	}
 }
 
 func classification(application string, category Category, risk Risk, reason, impact string) Classification {
@@ -138,38 +151,40 @@ func isSystemProcess(name string) bool {
 	return containsExact(name, "kernel_task", "launchd", "windowserver", "runningboardd", "syslogd", "opendirectoryd")
 }
 
-func browserIdentity(identity string) (string, bool) {
-	for _, match := range []struct{ signature, application string }{
-		{signature: "firefox", application: "Firefox"},
-		{signature: "google chrome", application: "Google Chrome"},
-		{signature: "chromium", application: "Chromium"},
-		{signature: "/safari.app/", application: "Safari"},
-		{signature: "/arc.app/", application: "Arc"},
-	} {
-		if strings.Contains(identity, match.signature) {
-			return match.application, true
-		}
+func browserIdentity(name, executableBase, bundle string) (string, bool) {
+	switch {
+	case bundle == "firefox" || name == "firefox" || strings.HasPrefix(name, "firefox ") || executableBase == "firefox":
+		return "Firefox", true
+	case bundle == "google chrome" || name == "google chrome" || strings.HasPrefix(name, "google chrome ") || executableBase == "google chrome":
+		return "Google Chrome", true
+	case bundle == "chromium" || name == "chromium" || strings.HasPrefix(name, "chromium ") || executableBase == "chromium":
+		return "Chromium", true
+	case bundle == "safari":
+		return "Safari", true
+	case bundle == "arc":
+		return "Arc", true
+	default:
+		return "", false
 	}
-	return "", false
 }
 
-func databaseIdentity(identity string) (string, bool) {
+func databaseIdentity(name, executableBase string) (string, bool) {
 	for _, match := range []struct{ signature, application string }{
 		{signature: "postgres", application: "PostgreSQL"},
 		{signature: "mysqld", application: "MySQL"},
 		{signature: "redis-server", application: "Redis"},
 		{signature: "mongod", application: "MongoDB"},
 	} {
-		if strings.Contains(identity, match.signature) {
+		if name == match.signature || executableBase == match.signature {
 			return match.application, true
 		}
 	}
 	return "", false
 }
 
-func containsAny(value string, fragments ...string) bool {
-	for _, fragment := range fragments {
-		if strings.Contains(value, fragment) {
+func matchesExact(name, executableBase string, signatures ...string) bool {
+	for _, signature := range signatures {
+		if name == signature || executableBase == signature {
 			return true
 		}
 	}

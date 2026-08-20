@@ -8,7 +8,7 @@ Classification may use only the sanitized process name, sanitized executable ide
 
 ## Categories
 
-V1 recognizes browsers and helpers, editors/IDEs, compilers, databases, container runtimes, virtual machines, AI inference, language servers, system services, user application bundles, and unknown processes. Signatures are ordered and exact enough to remain reproducible; an application bundle alone identifies ownership but does not prove purpose.
+V1 recognizes browsers and helpers, editors/IDEs, compilers, databases, container runtimes, virtual machines, AI inference, language servers, system services, user application bundles, and unknown processes. Signatures use exact executable/name matches, anchored worker prefixes, or exact `.app` bundle identities; incidental substrings remain unknown. An application bundle alone identifies ownership but does not prove purpose.
 
 ## Stopping risk
 
@@ -21,7 +21,7 @@ ProcessPilot never says “safe to kill.” Risk is informational and conservati
 
 ## Ownership and grouping
 
-Ownership walks parent PIDs with a visited set and a 64-node bound. Cycles, missing parents, and unknown identities remain low-confidence. A known signature or `.app` bundle may establish an owner. Unknown processes are keyed internally by PID rather than grouped merely because names match. This internal key keeps storage rows distinct and is not serialized in the API.
+Ownership walks parent PIDs with a visited set and a 64-node bound. Cycles, missing parents, and unknown identities remain low-confidence. The outermost recognized non-system ancestor or `.app` bundle may establish an owner; a generic `launchd` ancestor does not make an unknown child a known system service. Unknown processes are keyed internally by PID plus process start time rather than grouped merely because names match. This internal key keeps storage rows and PID reuse distinct and is not serialized in the API.
 
 Application CPU and memory are sums of member observations. Member PIDs are retained so users can move from grouped application evidence to raw process evidence.
 
