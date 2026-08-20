@@ -10,8 +10,8 @@
 - [x] #8 Build deterministic process grouping
 - [x] #9 Build deterministic classification and stopping-risk rules
 - [x] #10 Build process ownership tree
-- [ ] #11 Add system-pressure model
-- [ ] #12 Implement deterministic anomaly detection
+- [x] #11 Add system-pressure model
+- [x] #12 Implement deterministic anomaly detection
 - [ ] #13 Build the localhost-only v1 API
 - [ ] #14 Build the semantic dashboard
 - [ ] #15 Add Server-Sent Events updates

@@ -132,6 +132,9 @@ func (s Snapshot) validate() error {
 		if !inRange(process.CPUPercent, 0, maxCPU) {
 			return invalid("processes[%d].cpuPercent is invalid", i)
 		}
+		if process.MemoryBytes > s.System.TotalMemoryBytes {
+			return invalid("processes[%d].memoryBytes exceeds physical memory", i)
+		}
 		if process.StartTimeUnixSeconds == 0 || process.StartTimeUnixSeconds > s.TimestampUnixMS/1_000+300 {
 			return invalid("processes[%d].startTimeUnixSeconds is invalid", i)
 		}
