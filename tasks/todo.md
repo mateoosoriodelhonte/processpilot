@@ -7,9 +7,9 @@
 - [x] #5 Build the Go collector supervisor
 - [ ] #6 Add SQLite persistence and migrations
 - [ ] #7 Implement bounded telemetry retention
-- [ ] #8 Build deterministic process grouping
-- [ ] #9 Build deterministic classification and stopping-risk rules
-- [ ] #10 Build process ownership tree
+- [x] #8 Build deterministic process grouping
+- [x] #9 Build deterministic classification and stopping-risk rules
+- [x] #10 Build process ownership tree
 - [ ] #11 Add system-pressure model
 - [ ] #12 Implement deterministic anomaly detection
 - [ ] #13 Build the localhost-only v1 API
