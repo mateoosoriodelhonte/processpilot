@@ -1,0 +1,40 @@
+{
+  "protocolVersion": 1,
+  "timestampUnixMs": 1787256000000,
+  "sequence": 42,
+  "system": {
+    "totalMemoryBytes": 68719476736,
+    "usedMemoryBytes": 54760833024,
+    "availableMemoryBytes": 13958643712,
+    "totalSwapBytes": 17179869184,
+    "usedSwapBytes": 11381663334,
+    "cpuPercent": 42.5,
+    "loadAverage1": 3.1,
+    "loadAverage5": 2.8,
+    "loadAverage15": 2.4,
+    "logicalCpuCount": 12
+  },
+  "processesTruncated": false,
+  "processes": [
+    {
+      "pid": 95707,
+      "parentPid": 95000,
+      "name": "ollama runner",
+      "executable": "~/Applications/Ollama.app/Contents/MacOS/ollama",
+      "cpuPercent": 4.2,
+      "memoryBytes": 32427003085,
+      "startTimeUnixSeconds": 1787252400,
+      "status": "Run"
+    },
+    {
+      "pid": 95000,
+      "parentPid": 1,
+      "name": "Ollama",
+      "executable": "/Applications/Ollama.app/Contents/MacOS/Ollama",
+      "cpuPercent": 0.3,
+      "memoryBytes": 125829120,
+      "startTimeUnixSeconds": 1787252300,
+      "status": "Sleep"
+    }
+  ]
+}

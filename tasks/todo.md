@@ -1,0 +1,37 @@
+# ProcessPilot V1 Task List
+
+- [x] #1 Bootstrap Rust/Go repository
+- [x] #2 Define the versioned collector protocol
+- [x] #3 Implement unprivileged macOS telemetry collector
+- [x] #4 Add privacy normalization and redaction layer
+- [x] #5 Build the Go collector supervisor
+- [x] #6 Add SQLite persistence and migrations
+- [x] #7 Implement bounded telemetry retention
+- [x] #8 Build deterministic process grouping
+- [x] #9 Build deterministic classification and stopping-risk rules
+- [x] #10 Build process ownership tree
+- [x] #11 Add system-pressure model
+- [x] #12 Implement deterministic anomaly detection
+- [x] #13 Build the localhost-only v1 API
+- [x] #14 Build the semantic dashboard
+- [x] #15 Add Server-Sent Events updates
+- [x] #16 Add history and anomaly views
+- [x] #17 Build the read-only CLI
+- [x] #18 Add NoAI explanation provider
+- [x] #19 Add optional local Ollama explanations
+- [x] #20 Add security regression suite
+- [x] #21 Add cross-language contract tests
+- [x] #22 Measure and bound performance
+- [x] #23 Complete privacy, architecture, and threat-model documentation
+- [x] #24 Package ProcessPilot for macOS
+- [ ] #25 Release ProcessPilot v1.0
+
+## Standing Definition of Done
+
+- [x] Acceptance criteria and negative security criteria pass.
+- [x] Runtime behavior is verified, not only compiled.
+- [x] New behavior has tests that fail without it and pass with it.
+- [x] Formatting, linting, tests, builds, and integration checks are green.
+- [x] Public behavior, contracts, and architectural decisions are documented.
+- [x] Final diff contains only intended work and no secrets or generated build output.
+- [x] Security, privacy, observability, rollback/removal, and compatibility are reviewed.

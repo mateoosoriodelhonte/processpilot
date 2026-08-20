@@ -1,0 +1,31 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Go
+/bin/
+/coverage.out
+
+# ProcessPilot runtime data
+/*.db
+/*.db-shm
+/*.db-wal
+/data/
+/dist/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Editor and macOS metadata
+.DS_Store
+.idea/
+.vscode/
+
+# Browser tests
+/node_modules/
+/test-results/
+/playwright-report/

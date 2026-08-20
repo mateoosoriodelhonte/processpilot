@@ -1,0 +1,119 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify tagged source
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
+        with:
+          components: rustfmt, clippy
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          cache: npm
+      - name: Require a tagged main commit
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - name: Run code and protocol gates
+        run: |
+          make check
+          go test -race ./...
+      - name: Run dependency vulnerability gates
+        run: |
+          cargo install cargo-audit --locked --version 0.22.2
+          cargo audit
+          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+          govulncheck ./...
+          npm audit --audit-level=high
+      - name: Run browser and accessibility gates
+        run: |
+          npm ci
+          npx playwright install chromium
+          npm test
+
+  package:
+    name: Package macOS ${{ matrix.arch }}
+    needs: verify
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: amd64
+            runner: macos-15-intel
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Validate tag and version
+        run: test "${GITHUB_REF_NAME#v}" = "$(tr -d '[:space:]' < VERSION)"
+      - name: Build archive
+        env:
+          PROCESSPILOT_TARGET_ARCH: ${{ matrix.arch }}
+        run: ./scripts/package.sh
+      - name: Verify archive architecture and smoke the live packaged pair
+        shell: bash
+        run: |
+          cd dist
+          shasum -a 256 -c *.sha256
+          mkdir "$RUNNER_TEMP/processpilot-package"
+          tar -xzf processpilot-*-darwin-${{ matrix.arch }}.tar.gz -C "$RUNNER_TEMP/processpilot-package"
+          package_directory="$RUNNER_TEMP/processpilot-package/processpilot-$(cat ../VERSION)-darwin-${{ matrix.arch }}"
+          expected_architecture=${{ matrix.arch }}
+          if [[ "$expected_architecture" == "amd64" ]]; then expected_architecture=x86_64; fi
+          file "$package_directory/processpilot" | grep "$expected_architecture"
+          file "$package_directory/processpilot-collector" | grep "$expected_architecture"
+          test "$(uname -m)" = "$expected_architecture"
+          "$package_directory/processpilot" serve --port 7349 --interval 2s >"$RUNNER_TEMP/processpilot-smoke.log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:7349/api/v1/system >/dev/null; then break; fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:7349/api/v1/system | grep '"demo":false'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: processpilot-darwin-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub release
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Verify checksums
+        run: cd dist && shasum -a 256 -c *.sha256
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --generate-notes --title "ProcessPilot $GITHUB_REF_NAME"

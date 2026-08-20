@@ -1,0 +1,44 @@
+{{define "base"}}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{{.Title}} · ProcessPilot</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script defer src="/static/app.js"></script>
+</head>
+<body data-snapshot-timestamp="{{.State.Snapshot.TimestampUnixMS}}">
+  <a class="skip-link" href="#content">Skip to content</a>
+  <div class="shell">
+    <aside class="sidebar" aria-label="Primary navigation">
+      <a class="brand" href="/" aria-label="ProcessPilot overview">
+        <span class="brand-mark" aria-hidden="true">PP</span>
+        <span><strong>ProcessPilot</strong><small>Local system observer</small></span>
+      </a>
+      <nav>
+        <a class="{{if eq .Navigation "overview"}}active{{end}}" href="/">Overview</a>
+        <a class="{{if eq .Navigation "applications"}}active{{end}}" href="/applications">Applications</a>
+        <a class="{{if eq .Navigation "processes"}}active{{end}}" href="/processes">Processes</a>
+        <a class="{{if eq .Navigation "history"}}active{{end}}" href="/history">History</a>
+        <a class="{{if eq .Navigation "anomalies"}}active{{end}}" href="/anomalies">Anomalies</a>
+      </nav>
+      <nav class="secondary-nav" aria-label="Trust and configuration">
+        <a class="{{if eq .Navigation "privacy"}}active{{end}}" href="/privacy">Privacy</a>
+        <a class="{{if eq .Navigation "settings"}}active{{end}}" href="/settings">Settings</a>
+      </nav>
+      <div class="connection" role="status" aria-live="polite">
+        <span class="live-dot" aria-hidden="true"></span>
+        <span data-live-status>Live · local only</span>
+      </div>
+    </aside>
+    <main id="content" tabindex="-1">
+      {{if .State.Demo}}<div class="demo-banner" role="status"><strong>Demo data</strong><span>These numbers are deterministic examples, not telemetry from this Mac.</span></div>{{end}}
+      {{if .State.Snapshot.ProcessesTruncated}}<div class="demo-banner" role="status"><strong>Partial process list</strong><span>The collector bounded this snapshot to stay within the local protocol limit. System totals remain complete.</span></div>{{end}}
+      {{if .State.Warning}}<div class="demo-banner" role="status"><strong>Degraded history</strong><span>{{.State.Warning}}</span></div>{{end}}
+      {{template "content" .}}
+      <footer>ProcessPilot observes, classifies, and explains. It never controls processes.</footer>
+    </main>
+  </div>
+</body>
+</html>{{end}}
