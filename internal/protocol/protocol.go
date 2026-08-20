@@ -94,6 +94,17 @@ func (s Snapshot) validate() error {
 	if s.TimestampUnixMS == 0 {
 		return invalid("timestampUnixMs must be positive")
 	}
+	if exceedsSQLiteRange(
+		s.TimestampUnixMS,
+		s.Sequence,
+		s.System.TotalMemoryBytes,
+		s.System.UsedMemoryBytes,
+		s.System.AvailableMemoryBytes,
+		s.System.TotalSwapBytes,
+		s.System.UsedSwapBytes,
+	) {
+		return invalid("unsigned system value exceeds SQLite integer range")
+	}
 	if len(s.Processes) > maxProcesses {
 		return invalid("process count %d exceeds %d", len(s.Processes), maxProcesses)
 	}
@@ -138,6 +149,9 @@ func (s Snapshot) validate() error {
 		if process.StartTimeUnixSeconds == 0 || process.StartTimeUnixSeconds > s.TimestampUnixMS/1_000+300 {
 			return invalid("processes[%d].startTimeUnixSeconds is invalid", i)
 		}
+		if exceedsSQLiteRange(process.MemoryBytes, process.StartTimeUnixSeconds) {
+			return invalid("processes[%d] value exceeds SQLite integer range", i)
+		}
 		if strings.TrimSpace(process.Status) == "" || len(process.Status) > maxStatusBytes {
 			return invalid("processes[%d].status is empty or too long", i)
 		}
@@ -155,4 +169,13 @@ func inRange(value, minimum, maximum float64) bool {
 
 func nonNegativeFinite(value float64) bool {
 	return inRange(value, 0, math.MaxFloat64)
+}
+
+func exceedsSQLiteRange(values ...uint64) bool {
+	for _, value := range values {
+		if value > math.MaxInt64 {
+			return true
+		}
+	}
+	return false
 }

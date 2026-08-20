@@ -5,8 +5,8 @@
 - [x] #3 Implement unprivileged macOS telemetry collector
 - [x] #4 Add privacy normalization and redaction layer
 - [x] #5 Build the Go collector supervisor
-- [ ] #6 Add SQLite persistence and migrations
-- [ ] #7 Implement bounded telemetry retention
+- [x] #6 Add SQLite persistence and migrations
+- [x] #7 Implement bounded telemetry retention
 - [x] #8 Build deterministic process grouping
 - [x] #9 Build deterministic classification and stopping-risk rules
 - [x] #10 Build process ownership tree

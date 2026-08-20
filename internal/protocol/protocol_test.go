@@ -77,6 +77,16 @@ func TestSnapshotHasNoRawCommandLineField(t *testing.T) {
 	}
 }
 
+func TestDecodeRejectsUnsignedValuesOutsideSQLiteRange(t *testing.T) {
+	raw := strings.Replace(validSnapshotJSON(), `"totalMemoryBytes":100`, `"totalMemoryBytes":18446744073709551615`, 1)
+
+	_, err := Decode([]byte(raw))
+
+	if err == nil || !strings.Contains(err.Error(), "SQLite") {
+		t.Fatalf("Decode() error = %v, want SQLite range rejection", err)
+	}
+}
+
 func validSnapshotJSON() string {
 	return `{"protocolVersion":1,"timestampUnixMs":1787256000000,"sequence":1,"system":{"totalMemoryBytes":100,"usedMemoryBytes":50,"availableMemoryBytes":50,"totalSwapBytes":0,"usedSwapBytes":0,"cpuPercent":10,"loadAverage1":1,"loadAverage5":1,"loadAverage15":1,"logicalCpuCount":8},"processes":[{"pid":2,"parentPid":1,"name":"known","executable":"/Applications/Known.app/Known","cpuPercent":1,"memoryBytes":10,"startTimeUnixSeconds":1787250000,"status":"Run"}]}`
 }
