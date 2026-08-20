@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -27,6 +28,23 @@ func TestNoAIProviderExplainsWithoutARequiredModel(t *testing.T) {
 	if !strings.Contains(explanation.Text, "Ollama") || !strings.Contains(explanation.Text, "memory") {
 		t.Fatalf("explanation is not useful: %q", explanation.Text)
 	}
+}
+
+func TestFallbackProviderDegradesToDeterministicExplanation(t *testing.T) {
+	provider := FallbackProvider{Primary: errorProvider{}, Fallback: NoAIProvider{}}
+	explanation, err := provider.Explain(context.Background(), testInput())
+	if err != nil {
+		t.Fatalf("Explain() error = %v", err)
+	}
+	if explanation.Provider != "ProcessPilot" || explanation.GeneratedByAI {
+		t.Fatalf("explanation = %#v", explanation)
+	}
+}
+
+type errorProvider struct{}
+
+func (errorProvider) Explain(context.Context, Input) (Explanation, error) {
+	return Explanation{}, errors.New("unavailable")
 }
 
 func TestExplanationInputCannotCarrySensitiveMetadata(t *testing.T) {

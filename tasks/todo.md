@@ -16,11 +16,11 @@
 - [x] #14 Build the semantic dashboard
 - [x] #15 Add Server-Sent Events updates
 - [x] #16 Add history and anomaly views
-- [ ] #17 Build the read-only CLI
+- [x] #17 Build the read-only CLI
 - [x] #18 Add NoAI explanation provider
 - [x] #19 Add optional local Ollama explanations
 - [ ] #20 Add security regression suite
-- [ ] #21 Add cross-language contract tests
+- [x] #21 Add cross-language contract tests
 - [ ] #22 Measure and bound performance
 - [ ] #23 Complete privacy, architecture, and threat-model documentation
 - [ ] #24 Package ProcessPilot for macOS

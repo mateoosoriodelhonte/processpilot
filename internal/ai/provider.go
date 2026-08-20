@@ -31,6 +31,25 @@ type Provider interface {
 	Explain(context.Context, Input) (Explanation, error)
 }
 
+// FallbackProvider keeps explanations available when an optional local model is
+// stopped or unreachable. Classification and analysis never depend on either provider.
+type FallbackProvider struct {
+	Primary  Provider
+	Fallback Provider
+}
+
+func (provider FallbackProvider) Explain(ctx context.Context, input Input) (Explanation, error) {
+	if provider.Primary != nil {
+		if explanation, err := provider.Primary.Explain(ctx, input); err == nil {
+			return explanation, nil
+		}
+	}
+	if provider.Fallback == nil {
+		return Explanation{}, errors.New("explanation provider is unavailable")
+	}
+	return provider.Fallback.Explain(ctx, input)
+}
+
 type NoAIProvider struct{}
 
 func (NoAIProvider) Explain(_ context.Context, input Input) (Explanation, error) {
