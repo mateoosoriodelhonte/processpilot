@@ -17,8 +17,8 @@
 - [ ] #15 Add Server-Sent Events updates
 - [ ] #16 Add history and anomaly views
 - [ ] #17 Build the read-only CLI
-- [ ] #18 Add NoAI explanation provider
-- [ ] #19 Add optional local Ollama explanations
+- [x] #18 Add NoAI explanation provider
+- [x] #19 Add optional local Ollama explanations
 - [ ] #20 Add security regression suite
 - [ ] #21 Add cross-language contract tests
 - [ ] #22 Measure and bound performance
