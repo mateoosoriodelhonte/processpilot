@@ -13,9 +13,9 @@
 - [x] #11 Add system-pressure model
 - [x] #12 Implement deterministic anomaly detection
 - [x] #13 Build the localhost-only v1 API
-- [ ] #14 Build the semantic dashboard
-- [ ] #15 Add Server-Sent Events updates
-- [ ] #16 Add history and anomaly views
+- [x] #14 Build the semantic dashboard
+- [x] #15 Add Server-Sent Events updates
+- [x] #16 Add history and anomaly views
 - [ ] #17 Build the read-only CLI
 - [x] #18 Add NoAI explanation provider
 - [x] #19 Add optional local Ollama explanations

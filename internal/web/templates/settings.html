@@ -1,0 +1,10 @@
+{{define "content"}}
+<header class="page-header"><div><p class="eyebrow">Fail-closed configuration</p><h1>Local settings</h1><p>V1 settings are selected when ProcessPilot starts. There are no remote or automatic controls.</p></div></header>
+<div class="settings-list">
+  <section class="panel setting"><div><h2>Collection interval</h2><p>2 seconds by default; accepted range is 500 milliseconds to 60 seconds.</p></div><strong>2 s</strong></section>
+  <section class="panel setting"><div><h2>History retention</h2><p>Sanitized telemetry is removed after the configured local retention window.</p></div><strong>7 days</strong></section>
+  <section class="panel setting"><div><h2>Explanation provider</h2><p>ProcessPilot's deterministic NoAI provider is the default. Optional Ollama connects to loopback only and receives an allowlisted summary.</p></div><strong>No AI</strong></section>
+  <section class="panel setting"><div><h2>Network boundary</h2><p>The dashboard listens only on this Mac. V1 does not support a public bind.</p></div><strong class="mono">127.0.0.1</strong></section>
+</div>
+<p class="boundary-note standalone">No setting can enable process control, command execution, telemetry upload, or invasive permissions.</p>
+{{end}}

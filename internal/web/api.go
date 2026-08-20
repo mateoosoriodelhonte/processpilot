@@ -31,6 +31,7 @@ func Address(port int) (string, error) {
 func New(service *app.Service) *Server {
 	server := &Server{service: service, mux: http.NewServeMux()}
 	server.routes()
+	server.pageRoutes()
 	return server
 }
 

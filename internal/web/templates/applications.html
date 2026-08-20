@@ -1,0 +1,8 @@
+{{define "content"}}
+<header class="page-header"><div><p class="eyebrow">Grouped evidence</p><h1>Applications</h1><p>Related helper processes are grouped under the application ProcessPilot can identify.</p></div></header>
+<section class="panel">
+  {{if .State.Analysis.Applications}}<div class="table-scroll"><table><thead><tr><th>Application</th><th>Purpose</th><th>Processes</th><th>CPU</th><th>Memory</th><th>Stopping risk</th></tr></thead><tbody>
+  {{range .State.Analysis.Applications}}<tr><td><strong>{{.Name}}</strong><small class="cell-detail">PIDs {{range $index, $pid := .PIDs}}{{if $index}}, {{end}}{{$pid}}{{end}}</small></td><td>{{category .Category}}</td><td>{{.ProcessCount}}</td><td>{{percent .CPUPercent}}</td><td><strong>{{bytes .MemoryBytes}}</strong></td><td><span class="risk {{lower .Risk}}">{{.Risk}}</span></td></tr>{{end}}
+  </tbody></table></div>{{else}}<div class="empty"><h2>No applications yet</h2><p>Application groups appear after a telemetry snapshot.</p></div>{{end}}
+</section>
+{{end}}

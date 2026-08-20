@@ -1,0 +1,5 @@
+{{define "content"}}
+<header class="page-header"><div><p class="eyebrow">Deterministic changes</p><h1>Anomalies</h1><p>Interesting changes found by documented rules—not by AI.</p></div></header>
+{{if .State.Anomalies}}<div class="anomaly-list">{{range .State.Anomalies}}<article class="panel anomaly"><div><span class="risk medium">{{.Kind}}</span><h2>{{.Application}}</h2></div><dl><div><dt>Rule</dt><dd>{{.Rule}}</dd></div><div><dt>Evidence</dt><dd>{{.Evidence}}</dd></div></dl></article>{{end}}</div>
+{{else}}<section class="panel empty"><h2>No anomalies in this snapshot</h2><p>ProcessPilot needs enough retained evidence before it claims a spike, sustained CPU, or growth pattern.</p></section>{{end}}
+{{end}}

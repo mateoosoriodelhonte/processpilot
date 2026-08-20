@@ -1,0 +1,27 @@
+{{define "content"}}
+<header class="page-header">
+  <div><p class="eyebrow">System overview</p><h1>Why is my Mac slow?</h1><p>Current resource pressure, the applications behind it, and what those measurements mean.</p></div>
+  <p class="updated">Updated <span data-updated-at>{{time .State.Snapshot.TimestampUnixMS}}</span></p>
+</header>
+<section class="metric-strip" aria-label="Current system measurements">
+  <article><span>Memory</span><strong>{{bytes .State.Snapshot.System.UsedMemoryBytes}}</strong><small>of {{bytes .State.Snapshot.System.TotalMemoryBytes}}</small></article>
+  <article><span>CPU</span><strong>{{percent .State.Snapshot.System.CPUPercent}}</strong><small>across {{.State.Snapshot.System.LogicalCPUCount}} logical cores</small></article>
+  <article><span>Swap</span><strong>{{bytes .State.Snapshot.System.UsedSwapBytes}}</strong><small>of {{bytes .State.Snapshot.System.TotalSwapBytes}}</small></article>
+  <article class="pressure {{lower .State.Pressure.Level}}"><span>Resource pressure</span><strong data-system-pressure>{{.State.Pressure.Level}}</strong><small>{{.State.Pressure.Summary}}</small></article>
+</section>
+<div class="content-grid">
+  <section class="panel wide">
+    <div class="section-heading"><div><p class="eyebrow">Measured now</p><h2>Top applications</h2></div><a href="/applications">View all</a></div>
+    {{if .State.Analysis.Applications}}
+    <div class="table-scroll"><table><thead><tr><th>Application</th><th>Category</th><th>Processes</th><th>CPU</th><th>Memory</th><th>Stopping risk</th></tr></thead><tbody>
+      {{range .State.Analysis.Applications}}<tr><td><strong>{{.Name}}</strong></td><td>{{category .Category}}</td><td>{{.ProcessCount}}</td><td>{{percent .CPUPercent}}</td><td><strong>{{bytes .MemoryBytes}}</strong></td><td><span class="risk {{lower .Risk}}">{{.Risk}}</span></td></tr>{{end}}
+    </tbody></table></div>
+    {{else}}<div class="empty"><h3>No application data yet</h3><p>The first grouped snapshot will appear here.</p></div>{{end}}
+  </section>
+  <aside class="panel explanation-panel">
+    <p class="eyebrow">What this means</p><h2>{{.State.Pressure.Level}} pressure</h2><p>{{.State.Pressure.Summary}}</p>
+    <ul class="evidence-list">{{range .State.Pressure.Evidence}}<li>{{.}}</li>{{end}}</ul>
+    <p class="boundary-note">This is an explanation of observed telemetry. ProcessPilot cannot apply a fix or stop an application.</p>
+  </aside>
+</div>
+{{end}}

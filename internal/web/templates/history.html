@@ -1,0 +1,8 @@
+{{define "content"}}
+<header class="page-header"><div><p class="eyebrow">Bounded retention</p><h1>Resource history</h1><p>Sanitized application totals retained for trends. Default retention is seven days.</p></div></header>
+<section class="panel">
+  {{if .History}}<div class="table-scroll"><table><thead><tr><th>Time</th><th>Application</th><th>CPU</th><th>Memory</th></tr></thead><tbody>{{range .History}}<tr><td>{{dateTime .Timestamp}}</td><td><strong>{{.Application}}</strong></td><td>{{percent .CPUPercent}}</td><td>{{bytes .MemoryBytes}}</td></tr>{{end}}</tbody></table></div>
+  {{else}}<div class="empty"><h2>No retained history yet</h2><p>History appears after ProcessPilot records more than one live snapshot. Demo data is never presented as machine history.</p></div>{{end}}
+</section>
+<p class="boundary-note standalone">History excludes raw command lines, environment variables, file contents, and network contents.</p>
+{{end}}
